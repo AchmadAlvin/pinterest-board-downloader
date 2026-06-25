@@ -507,7 +507,7 @@ function initialize_full_ui() {
 
     // Set initial state before appending so there's no flash
     full_ui_wrapper_elem.style.opacity = '0';
-    full_ui_wrapper_elem.style.transform = 'translateX(-50%) scale(0.5) translateY(20px)';
+    full_ui_wrapper_elem.style.transform = 'scale(0.5) translateY(20px)';
     document.body.appendChild(full_ui_wrapper_elem);
 
     // Animate open: scale up + fade in
@@ -520,12 +520,12 @@ function initialize_full_ui() {
             ease: 'power3.out',
             clearProps: 'opacity,y,scale',
             onComplete: () => {
-                full_ui_wrapper_elem.style.transform = 'translateX(-50%)';
+                full_ui_wrapper_elem.style.transform = '';
             }
         });
     } else {
         full_ui_wrapper_elem.style.opacity = '1';
-        full_ui_wrapper_elem.style.transform = 'translateX(-50%)';
+        full_ui_wrapper_elem.style.transform = '';
     }
 
     const state_control_btn = full_ui_wrapper_elem.querySelector('#cc_stateful_btn');
