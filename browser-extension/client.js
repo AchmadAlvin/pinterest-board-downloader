@@ -1333,6 +1333,8 @@ async function fetch_pin_media(pin_slug) {
     const api_url = `${window.location.origin}/resource/PinResource/get/?source_url=/pin/${pin_id}/&data=${encodeURIComponent(JSON.stringify(request_data))}`;
 
     try {
+        let pinData = null;
+        
         const response = await fetch(api_url, {
             method: 'GET',
             headers: { 
@@ -1342,16 +1344,49 @@ async function fetch_pin_media(pin_slug) {
             }
         });
 
-        if (!response.ok) {
-            logger('WARN', `API request failed for pin ${pin_id} with status ${response.status}`);
-            return null;
+        if (response.ok) {
+            const json_data = await response.json();
+            pinData = json_data?.resource_response?.data;
         }
 
-        const json_data = await response.json();
-        const pinData = json_data?.resource_response?.data;
+        // --- HTML FALLBACK (If API 403s or fails) ---
+        if (!pinData) {
+            logger('WARN', `API failed for pin ${pin_id}, falling back to HTML extraction...`);
+            const html_response = await fetch(`/pin/${pin_id}/`);
+            if (html_response.ok) {
+                const html_text = await html_response.text();
+                // Find all MP4 URLs in the HTML
+                const mp4_regex = /"(https:\/\/[^"]+\.mp4[^"]*)"/g;
+                const mp4s = [];
+                let m;
+                while ((m = mp4_regex.exec(html_text)) !== null) {
+                    mp4s.push(m[1].replace(/\\u0026/g, '&').replace(/\\/g, ''));
+                }
+                
+                if (mp4s.length > 0) {
+                    logger('INFO', `Found ${mp4s.length} MP4 URLs in HTML for pin ${pin_id}`);
+                    // Prefer 1080p or 720p
+                    let best = mp4s.find(u => u.includes('1080p') || u.includes('V_1080P') || u.includes('V_ENC_1080P'));
+                    if (!best) best = mp4s.find(u => u.includes('720p') || u.includes('V_720P') || u.includes('V_ENC_720P'));
+                    if (!best) best = mp4s.find(u => u.includes('480p') || u.includes('V_480P') || u.includes('V_ENC_480P'));
+                    if (!best) best = mp4s[0];
+                    return [best];
+                }
+                
+                // If no MP4, try to find original image URL in HTML
+                const img_regex = /"(https:\/\/[^"]+\/originals\/[^"]+\.(?:jpg|png|webp))"/g;
+                const imgs = [];
+                while ((m = img_regex.exec(html_text)) !== null) {
+                    imgs.push(m[1].replace(/\\u0026/g, '&').replace(/\\/g, ''));
+                }
+                if (imgs.length > 0) {
+                    return [imgs[0]];
+                }
+            }
+        }
 
         if (!pinData) {
-            logger('WARN', `No pin data found in API response for pin ${pin_id}`);
+            logger('WARN', `No pin data found in API or HTML for pin ${pin_id}`);
             return null;
         }
 
