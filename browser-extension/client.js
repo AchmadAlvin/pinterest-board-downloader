@@ -876,19 +876,22 @@ async function populate_metadata_for_endless_batch() {
     const pins = Array.from(selected_pins.values());
     let processed = 0;
     
-    for (let i = 0; i < pins.length; i += 5) {
+    for (let i = 0; i < pins.length; i++) {
         if (!endless_mode_active) break;
-        const chunk = pins.slice(i, i + 5);
-        await Promise.all(chunk.map(async (pin) => {
+        const pin = pins[i];
+        try {
             const urls = await fetch_pin_media(pin.url);
             if (urls && urls.length > 0) {
                 pin.media_urls = urls;
             } else if (pin.image_url) {
                 pin.media_urls = [pin.image_url];
             }
-            processed++;
-        }));
+        } catch (err) {
+            if (pin.image_url) pin.media_urls = [pin.image_url];
+        }
+        processed++;
         update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Endless Mode: Extracting media ${processed}/${pins.length}...`);
+        if (i < pins.length - 1) await new Promise(r => setTimeout(r, 300));
     }
 }
 // --- END ENDLESS MODE LOGIC ---
@@ -1477,14 +1480,14 @@ async function initialize_downloads() {
     DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_log';
     update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Extracting high-res media: 0/${total}`);
 
-    for (let i = 0; i < pins_to_process.length; i += 5) {
+    // Process pins ONE AT A TIME with a small delay to avoid Pinterest rate-limiting
+    for (let i = 0; i < pins_to_process.length; i++) {
         if (cancel_downloads) break;
-        const chunk = pins_to_process.slice(i, i + 5);
-        await Promise.all(chunk.map(async (pin) => {
+        const pin = pins_to_process[i];
+        try {
             const urls = await fetch_pin_media(pin.url);
             if (urls && urls.length > 0) {
                 pin.media_urls = urls;
-                // Count video vs image
                 for (const u of urls) {
                     if (u.includes('.mp4') || u.includes('/videos/') || u.includes('video')) {
                         video_count++;
@@ -1500,9 +1503,19 @@ async function initialize_downloads() {
                 failed_pins.add(pin.url);
                 failed_count++;
             }
-            processed++;
-        }));
+        } catch (err) {
+            logger('ERROR', `Exception extracting pin ${pin.url}`, err);
+            if (pin.image_url) {
+                pin.media_urls = [pin.image_url];
+                image_count++;
+            } else {
+                failed_count++;
+            }
+        }
+        processed++;
         update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Extracting media: ${processed}/${total} (🎬${video_count} 🖼️${image_count})`);
+        // Small delay between API calls to avoid rate-limiting
+        if (i < pins_to_process.length - 1) await new Promise(r => setTimeout(r, 300));
     }
 
     if (cancel_downloads) return;
@@ -1891,8 +1904,8 @@ async function download_pins(items) {
         }
     }
 
-    if (failed_downloads > 0 && !endless_mode_active) {
-        throw new Error(`${failed_downloads} out of ${items.length} downloads failed. Check the console for details.`);
+    if (failed_downloads > 0) {
+        logger('WARN', `${failed_downloads} out of ${items.length} downloads failed. ${successful_downloads} succeeded.`);
     }
     return { failed_downloads, successful_downloads };
 }
