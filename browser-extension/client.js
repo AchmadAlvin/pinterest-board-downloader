@@ -159,7 +159,7 @@ async function initialize() {
             -webkit-backdrop-filter: blur(20px) saturate(200%) brightness(1.1);
             border: 1px solid var(--cc_fg_tert);
             box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-            position: fixed; left: 24px; bottom: 24px;
+            position: fixed; left: 24px; bottom: 80px;
             border-radius: 12px; cursor: pointer; z-index: 999999;
             overflow: hidden;
             transition: transform 0.1s ease, border-color 0.1s ease;
@@ -202,7 +202,7 @@ function initialize_full_ui() {
             width: 400px !important;
             max-width: calc(100vw - 48px);
             inline-size: unset;
-            position: fixed !important; bottom: 24px !important;
+            position: fixed !important; bottom: 80px !important;
             left: 24px !important;
             border-radius: 16px; overflow: hidden; z-index: 999999;
         }
