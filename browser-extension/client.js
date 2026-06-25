@@ -1355,17 +1355,37 @@ async function fetch_pin_media(pin_slug) {
             const html_response = await fetch(`/pin/${pin_id}/`);
             if (html_response.ok) {
                 const html_text = await html_response.text();
-                // Find all MP4 URLs in the HTML
-                const mp4_regex = /"(https:\/\/[^"]+\.mp4[^"]*)"/g;
-                const mp4s = [];
+                // 1. First attempt: Find video definitions by their V_ quality keys (most reliable for native videos)
+                const v_regex = /"(V_1080P|V_720P|V_480P|V_240P|V_ENC_1080P|V_ENC_720P|V_ENC_480P)"\s*:\s*\{[^}]*"url"\s*:\s*"(https:[^"]+)"/gi;
+                const v_matches = [];
                 let m;
+                while ((m = v_regex.exec(html_text)) !== null) {
+                    const quality = m[1].toUpperCase();
+                    let url = m[2].replace(/\\u0026/g, '&').replace(/\\/g, ''); // unescape slashes
+                    if (!url.includes('.m3u8')) {
+                        v_matches.push({ quality, url });
+                    }
+                }
+                
+                if (v_matches.length > 0) {
+                    logger('INFO', `Found ${v_matches.length} video URLs via V_ keys in HTML for pin ${pin_id}`);
+                    // Prefer 1080p -> 720p -> 480p
+                    let best = v_matches.find(v => v.quality.includes('1080P'));
+                    if (!best) best = v_matches.find(v => v.quality.includes('720P'));
+                    if (!best) best = v_matches.find(v => v.quality.includes('480P'));
+                    if (!best) best = v_matches[0];
+                    return [best.url];
+                }
+
+                // 2. Second attempt: Find any MP4 URLs anywhere in the HTML (catches escaped \/\/ slashes)
+                const mp4_regex = /"(https:[^"]+\.mp4[^"]*)"/gi;
+                const mp4s = [];
                 while ((m = mp4_regex.exec(html_text)) !== null) {
                     mp4s.push(m[1].replace(/\\u0026/g, '&').replace(/\\/g, ''));
                 }
                 
                 if (mp4s.length > 0) {
-                    logger('INFO', `Found ${mp4s.length} MP4 URLs in HTML for pin ${pin_id}`);
-                    // Prefer 1080p or 720p
+                    logger('INFO', `Found ${mp4s.length} MP4 URLs via regex in HTML for pin ${pin_id}`);
                     let best = mp4s.find(u => u.includes('1080p') || u.includes('V_1080P') || u.includes('V_ENC_1080P'));
                     if (!best) best = mp4s.find(u => u.includes('720p') || u.includes('V_720P') || u.includes('V_ENC_720P'));
                     if (!best) best = mp4s.find(u => u.includes('480p') || u.includes('V_480P') || u.includes('V_ENC_480P'));
