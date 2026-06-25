@@ -1355,7 +1355,62 @@ async function fetch_pin_media(pin_slug) {
             const html_response = await fetch(`/pin/${pin_id}/`);
             if (html_response.ok) {
                 const html_text = await html_response.text();
-                // 1. First attempt: Find video definitions by their V_ quality keys (most reliable for native videos)
+                // --- Safe JSON extraction from HTML ---
+                // Find the Relay data block for this specific pin to safely extract multiple videos (e.g. Story Pins) without grabbing related pins
+                const relay_splits = html_text.split('__PWS_RELAY_REGISTER_COMPLETED_REQUEST__');
+                let target_json = null;
+                for (let i = 1; i < relay_splits.length; i++) {
+                    if (relay_splits[i].includes(`"id":"${pin_id}"`)) {
+                        const match = relay_splits[i].match(/\(.*?, (\{.*?\})\);/);
+                        if (match) {
+                            try {
+                                const data = JSON.parse(match[1]);
+                                if (data?.data?.v3GetPinQueryv2?.id === pin_id) {
+                                    target_json = data.data.v3GetPinQueryv2;
+                                    break;
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                }
+                
+                if (target_json) {
+                    logger('INFO', `Found exact Relay JSON data in HTML for pin ${pin_id}`);
+                    const mp4_set = new Set();
+                    const img_set = new Set();
+                    function searchMedia(obj) {
+                        if (!obj || typeof obj !== 'object') return;
+                        if (obj.V_1080P || obj.V_720P || obj.V_480P || obj.V_ENC_1080P || obj.V_ENC_720P || obj.v_720p) {
+                            const url = extract_best_video(obj);
+                            if (url && !url.includes('.m3u8')) mp4_set.add(url);
+                            return;
+                        }
+                        if (obj.originals && obj.originals.url) {
+                            img_set.add(obj.originals.url);
+                        }
+                        if (Array.isArray(obj)) {
+                            obj.forEach(searchMedia);
+                        } else {
+                            for (const key of Object.keys(obj)) {
+                                if (key === 'related_pins' || key === 'relatedPins' || key === 'recommended_pins') continue;
+                                searchMedia(obj[key]);
+                            }
+                        }
+                    }
+                    searchMedia(target_json);
+                    
+                    if (mp4_set.size > 0) {
+                        logger('INFO', `Extracted ${mp4_set.size} video(s) from HTML JSON`);
+                        return Array.from(mp4_set);
+                    }
+                    if (img_set.size > 0) {
+                        return [Array.from(img_set)[0]];
+                    }
+                }
+                
+                logger('WARN', `Could not parse exact Relay JSON for pin ${pin_id}, falling back to raw regex...`);
+
+                // 1. First attempt: Find video definitions by their V_ quality keys
                 const v_regex = /"(V_1080P|V_720P|V_480P|V_240P|V_ENC_1080P|V_ENC_720P|V_ENC_480P)"\s*:\s*\{[^}]*"url"\s*:\s*"(https:[^"]+)"/gi;
                 const v_matches = [];
                 let m;
@@ -1369,15 +1424,23 @@ async function fetch_pin_media(pin_slug) {
                 
                 if (v_matches.length > 0) {
                     logger('INFO', `Found ${v_matches.length} video URLs via V_ keys in HTML for pin ${pin_id}`);
-                    // Prefer 1080p -> 720p -> 480p
-                    let best = v_matches.find(v => v.quality.includes('1080P'));
-                    if (!best) best = v_matches.find(v => v.quality.includes('720P'));
-                    if (!best) best = v_matches.find(v => v.quality.includes('480P'));
-                    if (!best) best = v_matches[0];
-                    return [best.url];
+                    // Group by base URL to extract multiple slides
+                    let slides = {};
+                    for (const v of v_matches) {
+                        const key = v.url.replace(/(1080p|720p|480p|240p|hls)/i, '');
+                        if (!slides[key]) slides[key] = [];
+                        slides[key].push(v);
+                    }
+                    const final_urls = [];
+                    for (const key in slides) {
+                        const versions = slides[key];
+                        let best = versions.find(v => v.quality.includes('1080P')) || versions.find(v => v.quality.includes('720P')) || versions.find(v => v.quality.includes('480P')) || versions[0];
+                        final_urls.push(best.url);
+                    }
+                    return final_urls;
                 }
 
-                // 2. Second attempt: Find any MP4 URLs anywhere in the HTML (catches escaped \/\/ slashes)
+                // 2. Second attempt: Find any MP4 URLs anywhere in the HTML
                 const mp4_regex = /"(https:[^"]+\.mp4[^"]*)"/gi;
                 const mp4s = [];
                 while ((m = mp4_regex.exec(html_text)) !== null) {
@@ -1386,11 +1449,19 @@ async function fetch_pin_media(pin_slug) {
                 
                 if (mp4s.length > 0) {
                     logger('INFO', `Found ${mp4s.length} MP4 URLs via regex in HTML for pin ${pin_id}`);
-                    let best = mp4s.find(u => u.includes('1080p') || u.includes('V_1080P') || u.includes('V_ENC_1080P'));
-                    if (!best) best = mp4s.find(u => u.includes('720p') || u.includes('V_720P') || u.includes('V_ENC_720P'));
-                    if (!best) best = mp4s.find(u => u.includes('480p') || u.includes('V_480P') || u.includes('V_ENC_480P'));
-                    if (!best) best = mp4s[0];
-                    return [best];
+                    let slides = {};
+                    for (const url of mp4s) {
+                        const key = url.replace(/(1080p|720p|480p|240p|hls)/i, '');
+                        if (!slides[key]) slides[key] = [];
+                        slides[key].push(url);
+                    }
+                    const final_urls = [];
+                    for (const key in slides) {
+                        const versions = slides[key];
+                        let best = versions.find(u => u.includes('1080p') || u.includes('V_1080P') || u.includes('V_ENC_1080P')) || versions.find(u => u.includes('720p') || u.includes('V_720P') || u.includes('V_ENC_720P')) || versions.find(u => u.includes('480p') || u.includes('V_480P') || u.includes('V_ENC_480P')) || versions[0];
+                        final_urls.push(best);
+                    }
+                    return final_urls;
                 }
                 
                 // If no MP4, try to find original image URL in HTML
