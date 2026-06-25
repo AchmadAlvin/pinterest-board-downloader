@@ -159,13 +159,13 @@ async function initialize() {
             -webkit-backdrop-filter: blur(20px) saturate(200%) brightness(1.1);
             border: 1px solid var(--cc_fg_tert);
             box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-            position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+            position: fixed; left: 24px; bottom: 24px;
             border-radius: 12px; cursor: pointer; z-index: 999999;
             overflow: hidden;
-            transition: transform 0.2s ease, border-color 0.2s ease;
+            transition: transform 0.1s ease, border-color 0.1s ease;
         }
         div#cc_enable_downloader > * { position: relative; z-index: 1; }
-        div#cc_enable_downloader:hover { border-color: var(--cc_accent_1); transform: translateX(-50%) scale(1.05); }
+        div#cc_enable_downloader:hover { border-color: var(--cc_accent_1); transform: scale(1.05); }
         div#cc_enable_downloader h2 { display: none; }
         div#cc_enable_downloader svg { width: 22px; height: 22px; }
         .cc_hidden { visibility: hidden !important; }
@@ -189,7 +189,7 @@ function initialize_full_ui() {
     let full_ui_wrapper_elem = html_to_element(`<div id="cc_full_ui_wrapper">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-        div#cc_full_ui_wrapper, div#cc_full_ui_wrapper *, div#cc_full_ui_wrapper *::before, div#cc_full_ui_wrapper *::after { box-sizing: border-box; margin: 0; padding: 0; transition: all 200ms ease-in-out; user-select: none; }
+        div#cc_full_ui_wrapper, div#cc_full_ui_wrapper *, div#cc_full_ui_wrapper *::before, div#cc_full_ui_wrapper *::after { box-sizing: border-box; margin: 0; padding: 0; transition: all 120ms cubic-bezier(0.2, 0.8, 0.2, 1); user-select: none; }
         div#cc_full_ui_wrapper {
             background: rgba(235, 235, 235, 0.6);
             backdrop-filter: blur(60px) saturate(200%) brightness(1.1);
@@ -203,7 +203,7 @@ function initialize_full_ui() {
             max-width: calc(100vw - 48px);
             inline-size: unset;
             position: fixed !important; bottom: 24px !important;
-            left: 50% !important; transform: translateX(-50%);
+            left: 24px !important;
             border-radius: 16px; overflow: hidden; z-index: 999999;
         }
         div#cc_full_ui_wrapper > * { position: relative; z-index: 1; }
