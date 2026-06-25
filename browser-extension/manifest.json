@@ -86,6 +86,7 @@
         "https://*.pinterest.com/*"
       ],
       "js": [
+        "gsap.min.js",
         "client.js"
       ],
       "run_at": "document_idle"

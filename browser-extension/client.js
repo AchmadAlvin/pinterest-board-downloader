@@ -134,21 +134,11 @@ function inject_global_styles() {
     }
 }
 
-function load_gsap() {
-    return new Promise((resolve) => {
-        if (window.gsap) { resolve(); return; }
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js';
-        script.onload = resolve;
-        script.onerror = resolve; // fallback gracefully if blocked
-        document.head.appendChild(script);
-    });
-}
+
 
 async function initialize() {
     logger('INFO', 'Pinterest Board Downloader is activating...');
     inject_global_styles();
-    await load_gsap();
 
     const stored_pins = localStorage.getItem('downloaded_pins');
     if (stored_pins) {
@@ -1337,7 +1327,7 @@ async function fetch_pin_media(pin_slug) {
     }
 
     const request_data = {
-        "options": { "id": pin_id, "field_set_key": "unauth_react_main_pin" },
+        "options": { "id": pin_id, "field_set_key": "detailed" },
         "context": {}
     };
     const api_url = `${window.location.origin}/resource/PinResource/get/?source_url=/pin/${pin_id}/&data=${encodeURIComponent(JSON.stringify(request_data))}`;
@@ -1345,7 +1335,11 @@ async function fetch_pin_media(pin_slug) {
     try {
         const response = await fetch(api_url, {
             method: 'GET',
-            headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': csrf_token }
+            headers: { 
+                'X-Requested-With': 'XMLHttpRequest', 
+                'X-CSRFToken': csrf_token,
+                'X-Pinterest-AppState': 'active'
+            }
         });
 
         if (!response.ok) {
