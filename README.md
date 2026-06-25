@@ -43,7 +43,16 @@ To prevent Pinterest from temporarily blocking your account, media extraction is
 
 ## Installation
 
-1. Download or clone this repository.
+### Quick Download
+1. Go to the [**Releases page**](https://github.com/AchmadAlvin/pinterest-board-downloader/releases/latest) and download the latest `.zip` file.
+2. Extract the zip file to a folder on your computer.
+3. Open `chrome://extensions/` in your browser.
+4. Enable **Developer mode** (toggle in the top-right corner).
+5. Click **Load unpacked** and select the extracted folder.
+6. Navigate to any Pinterest board and click the floating Pinterest icon at the bottom of the screen.
+
+### From Source
+1. Clone this repository: `git clone https://github.com/AchmadAlvin/pinterest-board-downloader.git`
 2. Open `chrome://extensions/` in your browser.
 3. Enable **Developer mode** (toggle in the top-right corner).
 4. Click **Load unpacked** and select the `browser-extension` folder.
