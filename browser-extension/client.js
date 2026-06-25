@@ -1345,61 +1345,107 @@ async function fetch_pin_media(pin_slug) {
             headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': csrf_token }
         });
 
-        if (!response.ok) return null;
+        if (!response.ok) {
+            logger('WARN', `API request failed for pin ${pin_id} with status ${response.status}`);
+            return null;
+        }
 
         const json_data = await response.json();
         const pinData = json_data?.resource_response?.data;
 
-        if (!pinData) return null;
+        if (!pinData) {
+            logger('WARN', `No pin data found in API response for pin ${pin_id}`);
+            return null;
+        }
 
         let media_urls = [];
 
+        // Helper: extract best video URL from a video_list object
+        function extract_best_video(video_list) {
+            if (!video_list) return null;
+            const quality_order = ['V_720P', 'V_1080P', 'V_480P', 'V_240P', 'V_ENC_720P', 'V_ENC_1080P', 'V_ENC_480P', 'V_ENC_240P'];
+            // First try named qualities
+            for (const q of quality_order) {
+                if (video_list[q]?.url) {
+                    return video_list[q].url;
+                }
+            }
+            // Fallback: pick the first entry that has a URL
+            for (const key of Object.keys(video_list)) {
+                if (video_list[key]?.url) {
+                    return video_list[key].url;
+                }
+            }
+            return null;
+        }
+
+        // 1. Story Pin (multi-page)
         if (pinData.story_pin_data && pinData.story_pin_data.pages) {
+            logger('DEBUG', `Pin ${pin_id}: Detected Story Pin with ${pinData.story_pin_data.pages.length} pages`);
             for (const page of pinData.story_pin_data.pages) {
                 let found_media = false;
                 for (const block of (page.blocks || [])) {
                     if (block.type === 'story_pin_video_block' && block.video?.video_list) {
-                        const quality_order = ['V_720P', 'V_1080P', 'V_480P', 'V_240P'];
-                        for (const q of quality_order) {
-                            if (block.video.video_list[q]?.url?.includes('.mp4')) {
-                                media_urls.push(block.video.video_list[q].url);
-                                found_media = true;
-                                break;
-                            }
-                        }
+                        const url = extract_best_video(block.video.video_list);
+                        if (url) { media_urls.push(url); found_media = true; }
                     } else if (block.type === 'story_pin_image_block' && block.image?.images?.originals?.url) {
                         media_urls.push(block.image.images.originals.url);
                         found_media = true;
                     }
                 }
-                if (!found_media && page.image?.images?.originals?.url) {
-                    media_urls.push(page.image.images.originals.url);
+                // Fallback: page-level video or image
+                if (!found_media) {
+                    if (page.video?.video_list) {
+                        const url = extract_best_video(page.video.video_list);
+                        if (url) { media_urls.push(url); found_media = true; }
+                    }
+                    if (!found_media && page.image?.images?.originals?.url) {
+                        media_urls.push(page.image.images.originals.url);
+                    }
                 }
             }
-        } 
+        }
+        // 2. Carousel (multi-image)
         else if (pinData.carousel_data && pinData.carousel_data.carousel_slots) {
+            logger('DEBUG', `Pin ${pin_id}: Detected Carousel with ${pinData.carousel_data.carousel_slots.length} slots`);
             for (const slot of pinData.carousel_data.carousel_slots) {
                 if (slot.images?.originals?.url) {
                     media_urls.push(slot.images.originals.url);
                 }
             }
-        } 
+        }
+        // 3. Regular video pin
         else if (pinData.videos?.video_list) {
-            const quality_order = ['V_720P', 'V_1080P', 'V_480P', 'V_240P'];
-            for (const quality of quality_order) {
-                if (pinData.videos.video_list[quality] && pinData.videos.video_list[quality].url && pinData.videos.video_list[quality].url.includes('.mp4')) {
-                    media_urls.push(pinData.videos.video_list[quality].url);
+            logger('DEBUG', `Pin ${pin_id}: Detected video pin`);
+            const url = extract_best_video(pinData.videos.video_list);
+            if (url) {
+                media_urls.push(url);
+            }
+        }
+
+        // 4. If no media found yet, check for video_urls field (alternative video storage)
+        if (media_urls.length === 0 && pinData.video_urls) {
+            logger('DEBUG', `Pin ${pin_id}: Found video_urls field`);
+            const video_url_list = Array.isArray(pinData.video_urls) ? pinData.video_urls : [pinData.video_urls];
+            for (const v of video_url_list) {
+                if (typeof v === 'string' && v.length > 0) {
+                    media_urls.push(v);
                     break;
                 }
             }
-        } 
-        else if (pinData.images?.originals?.url) {
+        }
+
+        // 5. Fallback to highest quality image
+        if (media_urls.length === 0 && pinData.images?.originals?.url) {
+            logger('DEBUG', `Pin ${pin_id}: Falling back to originals image`);
             media_urls.push(pinData.images.originals.url);
         }
 
+        logger('INFO', `Pin ${pin_id}: Extracted ${media_urls.length} media URL(s)`);
         return media_urls.length > 0 ? [...new Set(media_urls)] : null;
 
     } catch (error) {
+        logger('ERROR', `Failed to fetch media for pin ${pin_id}`, { original_error: error });
         return null;
     }
 }
@@ -1424,6 +1470,9 @@ async function initialize_downloads() {
     }
 
     let processed = 0;
+    let video_count = 0;
+    let image_count = 0;
+    let failed_count = 0;
     const total = pins_to_process.length;
     DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_log';
     update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Extracting high-res media: 0/${total}`);
@@ -1435,17 +1484,30 @@ async function initialize_downloads() {
             const urls = await fetch_pin_media(pin.url);
             if (urls && urls.length > 0) {
                 pin.media_urls = urls;
+                // Count video vs image
+                for (const u of urls) {
+                    if (u.includes('.mp4') || u.includes('/videos/') || u.includes('video')) {
+                        video_count++;
+                    } else {
+                        image_count++;
+                    }
+                }
             } else if (pin.image_url) {
                 pin.media_urls = [pin.image_url];
+                image_count++;
+                logger('WARN', `Pin ${pin.url}: API returned no media, falling back to thumbnail image`);
             } else {
                 failed_pins.add(pin.url);
+                failed_count++;
             }
             processed++;
         }));
-        update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Extracting high-res media: ${processed}/${total}`);
+        update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Extracting media: ${processed}/${total} (🎬${video_count} 🖼️${image_count})`);
     }
 
     if (cancel_downloads) return;
+
+    logger('INFO', `Extraction complete: ${video_count} videos, ${image_count} images, ${failed_count} failed out of ${total} pins`);
 
     const download_items = [];
     for (const pin of pins_to_process) {
