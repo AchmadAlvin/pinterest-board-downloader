@@ -1865,9 +1865,27 @@ async function download_pins(items) {
 
     const folder_name = get_folder_name();
 
+    // Deduplicate items based on media_url to prevent downloading identical files (e.g. pin_1234 (1).jpg)
+    const unique_items = [];
+    const seen_urls = new Set();
+    let duplicates_skipped = 0;
+    
+    for (const item of items) {
+        if (!seen_urls.has(item.media_url)) {
+            seen_urls.add(item.media_url);
+            unique_items.push(item);
+        } else {
+            duplicates_skipped++;
+        }
+    }
+    
+    if (duplicates_skipped > 0) {
+        logger('INFO', `Skipped ${duplicates_skipped} duplicate media URLs found in this batch.`);
+    }
+
     const chunks = [];
-    for (let i = 0; i < items.length; i += MAX_CONCURRENT_DOWNLOADS) {
-        chunks.push(items.slice(i, i + MAX_CONCURRENT_DOWNLOADS));
+    for (let i = 0; i < unique_items.length; i += MAX_CONCURRENT_DOWNLOADS) {
+        chunks.push(unique_items.slice(i, i + MAX_CONCURRENT_DOWNLOADS));
     }
 
     for (let i = 0; i < chunks.length; i++) {
