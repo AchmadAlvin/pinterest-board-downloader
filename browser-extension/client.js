@@ -1437,12 +1437,13 @@ async function fetch_pin_media(pin_slug) {
                 
                 if (v_matches.length > 0) {
                     logger('INFO', `Found ${v_matches.length} video URLs via V_ keys in HTML for pin ${pin_id}`);
-                    // Group by filename to ensure different quality URLs of the same video are grouped together
+                    // Group by video hash to ensure different quality URLs of the same video are grouped together
                     let slides = {};
                     for (const v of v_matches) {
                         const filename = v.url.split('/').pop().split('?')[0];
-                        if (!slides[filename]) slides[filename] = [];
-                        slides[filename].push(v);
+                        const base_id = filename.split('_')[0].split('.')[0];
+                        if (!slides[base_id]) slides[base_id] = [];
+                        slides[base_id].push(v);
                     }
                     const final_urls = [];
                     for (const key in slides) {
@@ -1465,8 +1466,9 @@ async function fetch_pin_media(pin_slug) {
                     let slides = {};
                     for (const url of mp4s) {
                         const filename = url.split('/').pop().split('?')[0];
-                        if (!slides[filename]) slides[filename] = [];
-                        slides[filename].push(url);
+                        const base_id = filename.split('_')[0].split('.')[0];
+                        if (!slides[base_id]) slides[base_id] = [];
+                        slides[base_id].push(url);
                     }
                     const final_urls = [];
                     for (const key in slides) {
