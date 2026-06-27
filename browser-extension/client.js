@@ -1437,12 +1437,12 @@ async function fetch_pin_media(pin_slug) {
                 
                 if (v_matches.length > 0) {
                     logger('INFO', `Found ${v_matches.length} video URLs via V_ keys in HTML for pin ${pin_id}`);
-                    // Group by base URL to extract multiple slides
+                    // Group by filename to ensure different quality URLs of the same video are grouped together
                     let slides = {};
                     for (const v of v_matches) {
-                        const key = v.url.replace(/(1080p|720p|480p|240p|hls)/i, '');
-                        if (!slides[key]) slides[key] = [];
-                        slides[key].push(v);
+                        const filename = v.url.split('/').pop().split('?')[0];
+                        if (!slides[filename]) slides[filename] = [];
+                        slides[filename].push(v);
                     }
                     const final_urls = [];
                     for (const key in slides) {
@@ -1464,9 +1464,9 @@ async function fetch_pin_media(pin_slug) {
                     logger('INFO', `Found ${mp4s.length} MP4 URLs via regex in HTML for pin ${pin_id}`);
                     let slides = {};
                     for (const url of mp4s) {
-                        const key = url.replace(/(1080p|720p|480p|240p|hls)/i, '');
-                        if (!slides[key]) slides[key] = [];
-                        slides[key].push(url);
+                        const filename = url.split('/').pop().split('?')[0];
+                        if (!slides[filename]) slides[filename] = [];
+                        slides[filename].push(url);
                     }
                     const final_urls = [];
                     for (const key in slides) {
