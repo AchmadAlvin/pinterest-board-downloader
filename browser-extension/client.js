@@ -1368,20 +1368,53 @@ async function fetch_pin_media(pin_slug) {
             if (html_response.ok) {
                 const html_text = await html_response.text();
                 // --- Safe JSON extraction from HTML ---
-                // Find the Relay data block for this specific pin to safely extract multiple videos (e.g. Story Pins) without grabbing related pins
-                const relay_splits = html_text.split('__PWS_RELAY_REGISTER_COMPLETED_REQUEST__');
                 let target_json = null;
-                for (let i = 1; i < relay_splits.length; i++) {
-                    if (relay_splits[i].includes(`"id":"${pin_id}"`)) {
-                        const match = relay_splits[i].match(/\(.*?, (\{.*?\})\);/);
-                        if (match) {
-                            try {
-                                const data = JSON.parse(match[1]);
-                                if (data?.data?.v3GetPinQueryv2?.id === pin_id) {
-                                    target_json = data.data.v3GetPinQueryv2;
-                                    break;
-                                }
-                            } catch (e) {}
+                
+                // Helper to recursively find the pin object
+                function findPinObj(obj) {
+                    if (!obj || typeof obj !== 'object') return null;
+                    // Usually pin objects have id == pin_id and might have 'type': 'pin' or just contain 'videos'/'images'
+                    if (obj.id === pin_id && (obj.type === 'pin' || obj.videos || obj.story_pin_data || obj.images)) return obj;
+                    
+                    if (Array.isArray(obj)) {
+                        for (let item of obj) {
+                            const res = findPinObj(item);
+                            if (res) return res;
+                        }
+                    } else {
+                        for (const key of Object.keys(obj)) {
+                            if (key === 'related_pins' || key === 'relatedPins' || key === 'recommended_pins') continue;
+                            const res = findPinObj(obj[key]);
+                            if (res) return res;
+                        }
+                    }
+                    return null;
+                }
+
+                // Check __PWS_DATA__ and __PWS_INITIAL_PROPS__
+                const json_regex = /<script[^>]*id="(?:__PWS_DATA__|__PWS_INITIAL_PROPS__)"[^>]*>(.*?)<\/script>/gs;
+                let script_match;
+                while ((script_match = json_regex.exec(html_text)) !== null) {
+                    try {
+                        const parsed = JSON.parse(script_match[1]);
+                        target_json = findPinObj(parsed);
+                        if (target_json) break;
+                    } catch (e) {}
+                }
+
+                // Fallback to Relay
+                if (!target_json) {
+                    const relay_splits = html_text.split('__PWS_RELAY_REGISTER_COMPLETED_REQUEST__');
+                    for (let i = 1; i < relay_splits.length; i++) {
+                        if (relay_splits[i].includes(`"id":"${pin_id}"`)) {
+                            const match = relay_splits[i].match(/\(.*?, (\{.*?\})\);/);
+                            if (match) {
+                                try {
+                                    const parsed = JSON.parse(match[1]);
+                                    target_json = findPinObj(parsed);
+                                    if (target_json) break;
+                                } catch (e) {}
+                            }
                         }
                     }
                 }
