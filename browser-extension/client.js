@@ -1423,13 +1423,14 @@ async function fetch_pin_media(pin_slug) {
                 logger('WARN', `Could not parse exact Relay JSON for pin ${pin_id}, falling back to raw regex...`);
 
                 // 1. First attempt: Find video definitions by their V_ quality keys
-                const v_regex = /"(V_1080P|V_720P|V_480P|V_240P|V_ENC_1080P|V_ENC_720P|V_ENC_480P)"\s*:\s*\{[^}]*"url"\s*:\s*"(https:[^"]+)"/gi;
+                // We use a more forgiving regex that allows for \" or &quot; escaping
+                const v_regex = /(?:\"|&quot;|"|\\")?(V_1080P|V_720P|V_480P|V_240P|V_ENC_1080P|V_ENC_720P|V_ENC_480P)(?:\"|&quot;|"|\\")?\s*:\s*\{[^}]*(?:\"|&quot;|"|\\")?url(?:\"|&quot;|"|\\")?\s*:\s*(?:\"|&quot;|"|\\")?(https:(?:\\\/|\/){2,}[^"'\s<>&]+)(?:\"|&quot;|"|\\")?/gi;
                 const v_matches = [];
                 let m;
                 while ((m = v_regex.exec(html_text)) !== null) {
                     const quality = m[1].toUpperCase();
                     let url = m[2].replace(/\\u0026/g, '&').replace(/\\/g, ''); // unescape slashes
-                    if (!url.includes('.m3u8')) {
+                    if (!url.includes('.m3u8') && url.includes('.mp4')) {
                         v_matches.push({ quality, url });
                     }
                 }
@@ -1453,7 +1454,7 @@ async function fetch_pin_media(pin_slug) {
                 }
 
                 // 2. Second attempt: Find any MP4 URLs anywhere in the HTML
-                const mp4_regex = /"(https:[^"]+\.mp4[^"]*)"/gi;
+                const mp4_regex = /(https:(?:\\\/|\/){2,}[^"'\s<>&]+\.mp4[^"'\s<>&]*)/gi;
                 const mp4s = [];
                 while ((m = mp4_regex.exec(html_text)) !== null) {
                     mp4s.push(m[1].replace(/\\u0026/g, '&').replace(/\\/g, ''));
