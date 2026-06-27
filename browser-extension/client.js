@@ -1976,12 +1976,16 @@ async function download_pins(items) {
     let duplicates_skipped = 0;
     
     for (const item of items) {
-        if (!downloaded_media_urls.has(item.media_url) && !seen_urls.has(item.media_url)) {
+        const globally_downloaded = stateful_mode && downloaded_media_urls.has(item.media_url);
+        
+        if (!globally_downloaded && !seen_urls.has(item.media_url)) {
             seen_urls.add(item.media_url);
             unique_items.push(item);
         } else {
             duplicates_skipped++;
-            downloaded_pins.add(item.pin_url);
+            if (stateful_mode) {
+                downloaded_pins.add(item.pin_url);
+            }
         }
     }
     
