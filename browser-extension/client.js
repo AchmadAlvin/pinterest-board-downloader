@@ -1448,8 +1448,11 @@ async function fetch_pin_media(pin_slug) {
                         logger('INFO', `Extracted ${mp4_set.size} video(s) from HTML JSON`);
                         return Array.from(mp4_set);
                     }
+                    // If only images found in JSON, save as fallback but continue to raw regex
+                    // because some video pins don't embed MP4 URLs in the structured JSON
                     if (img_set.size > 0) {
-                        return [Array.from(img_set)[0]];
+                        logger('INFO', `Found images but no videos in JSON for pin ${pin_id}, trying raw regex for MP4s...`);
+                        var json_image_fallback = Array.from(img_set);
                     }
                 }
                 
@@ -1520,6 +1523,12 @@ async function fetch_pin_media(pin_slug) {
                 }
                 if (imgs.length > 0) {
                     return [imgs[0]];
+                }
+
+                // If we found images in the structured JSON earlier but no video anywhere, return those
+                if (typeof json_image_fallback !== 'undefined' && json_image_fallback.length > 0) {
+                    logger('INFO', `No MP4 found via regex, returning image from JSON for pin ${pin_id}`);
+                    return [json_image_fallback[0]];
                 }
             }
         }
