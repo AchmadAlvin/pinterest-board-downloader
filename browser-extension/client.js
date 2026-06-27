@@ -10,6 +10,7 @@ let cancel_downloads = false;
 let stateful_mode = true;
 let MAX_CONCURRENT_DOWNLOADS = 10;
 let downloaded_pins = new Set();
+let downloaded_media_urls = new Set();
 let failed_pins = new Set();
 
 // Endless Mode Variables
@@ -144,6 +145,11 @@ async function initialize() {
     if (stored_pins) {
         downloaded_pins = new Set(JSON.parse(stored_pins));
         logger('INFO', `Loaded ${downloaded_pins.size} previously downloaded pins from history.`);
+    }
+
+    const stored_media = localStorage.getItem('downloaded_media_urls');
+    if (stored_media) {
+        downloaded_media_urls = new Set(JSON.parse(stored_media));
     }
 
     setup_url_change_detection();
@@ -837,6 +843,8 @@ async function run_endless_loop() {
                     const stats = await download_pins(batch_items);
                     endless_total_downloaded += stats.successful_downloads;
                     localStorage.setItem('downloaded_pins', JSON.stringify([...downloaded_pins]));
+                    localStorage.setItem('downloaded_media_urls', JSON.stringify([...downloaded_media_urls]));
+                    logger('INFO', `Batch complete. Total endless downloads: ${endless_total_downloaded}`);
                 } catch (e) {
                     logger('ERROR', 'Endless batch download error', e);
                 }
@@ -949,8 +957,12 @@ function clear_history() {
     const confirmation = confirm("Are you sure you want to clear your entire download history? This action cannot be undone.");
     if (confirmation) {
         downloaded_pins.clear();
+        downloaded_media_urls.clear();
         localStorage.removeItem('downloaded_pins');
+        localStorage.removeItem('downloaded_media_urls');
         logger('INFO', 'Download history has been cleared.');
+        DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_success';
+        update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, 'History cleared successfully.');
         alert('Download history has been successfully cleared.');
         remark_selected_pins();
     } else {
@@ -1669,6 +1681,7 @@ async function initialize_downloads() {
         DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_success';
         update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, message_template.download_success);
         localStorage.setItem('downloaded_pins', JSON.stringify([...downloaded_pins]));
+        localStorage.setItem('downloaded_media_urls', JSON.stringify([...downloaded_media_urls]));
         logger('INFO', `Updated download history. Total history size: ${downloaded_pins.size} pins.`);
     } catch (err) {
         logger('ERROR', 'The download process failed.', { original_error: err });
@@ -1962,11 +1975,12 @@ async function download_pins(items) {
     let duplicates_skipped = 0;
     
     for (const item of items) {
-        if (!seen_urls.has(item.media_url)) {
+        if (!downloaded_media_urls.has(item.media_url) && !seen_urls.has(item.media_url)) {
             seen_urls.add(item.media_url);
             unique_items.push(item);
         } else {
             duplicates_skipped++;
+            downloaded_pins.add(item.pin_url);
         }
     }
     
@@ -2019,6 +2033,7 @@ async function download_pins(items) {
                 }
 
                 downloaded_pins.add(item.pin_url);
+                downloaded_media_urls.add(item.media_url);
                 failed_pins.delete(item.pin_url);
                 return true;
             } catch (error) {
@@ -2260,6 +2275,7 @@ function close_full_ui() {
     document.querySelectorAll('[data-selected-overlay]').forEach(e => e.remove());
 
     localStorage.setItem('downloaded_pins', JSON.stringify([...downloaded_pins]));
+    localStorage.setItem('downloaded_media_urls', JSON.stringify([...downloaded_media_urls]));
     logger('INFO', `Saved download history of ${downloaded_pins.size} pins.`);
 
     selected_pins.clear();
