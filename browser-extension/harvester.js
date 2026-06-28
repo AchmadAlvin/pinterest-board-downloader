@@ -41,7 +41,12 @@ function extract_best_video(video_list, root_cache) {
             const clean = qual_obj.url.split('?')[0].split('#')[0].toLowerCase();
             if (clean.endsWith('.m3u8')) {
                 const base = qual_obj.url.replace('.m3u8', '.mp4');
-                return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}`;
+                const name = base.split('/').pop().replace('.mp4', '');
+                const base_1080w = base.replace(name + '.mp4', name + '_1080w.mp4');
+                const base_720w = base.replace(name + '.mp4', name + '_720w.mp4');
+                const base_480w = base.replace(name + '.mp4', name + '_480w.mp4');
+                
+                return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}||${base_1080w.replace('/hls/', '/1080p/')}||${base_720w.replace('/hls/', '/720p/')}||${base_480w.replace('/hls/', '/480p/')}`;
             }
         }
     }
