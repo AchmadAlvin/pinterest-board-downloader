@@ -2092,9 +2092,13 @@ async function download_pins(items) {
                         for (const url of fallback_urls) {
                             const isOk = await new Promise((res) => {
                                 const video = document.createElement('video');
-                                video.style.display = 'none';
-                                video.preload = 'metadata';
+                                video.style.position = 'absolute';
+                                video.style.width = '1px';
+                                video.style.height = '1px';
+                                video.style.opacity = '0.01'; // better than display:none to prevent Chrome suspension
+                                video.preload = 'auto'; // Force load
                                 video.muted = true;
+                                video.setAttribute('playsinline', 'true');
                                 document.body.appendChild(video);
                                 
                                 let timeoutId = setTimeout(() => {
@@ -2125,6 +2129,7 @@ async function download_pins(items) {
                                 
                                 video.src = url;
                                 video.load();
+                                video.play().catch(() => {}); // Aggressively force network request
                             });
                             
                             if (isOk) {
@@ -2173,24 +2178,28 @@ async function download_pins(items) {
                     });
                 }
 
-                if (response && response.fallback && item.image_url) {
-                    logger('WARN', `Server returned 403 for synthesized video URL, falling back to image: ${item.image_url}`);
-                    let imgFileName = item.image_url.split('/').pop().split('?')[0] || `pin_${Date.now()}`;
-                    const img_full_filename = `${folder_name}/${imgFileName}`;
-                    const imgResponse = await new Promise((resolve) => {
-                        chrome.runtime.sendMessage(
-                            { action: "download_pin", urls: [item.image_url], filename: img_full_filename },
-                            (res) => {
-                                if (chrome.runtime.lastError) {
-                                    resolve({ success: false, error: chrome.runtime.lastError.message });
-                                } else {
-                                    resolve(res);
+                if (response && response.fallback) {
+                    if (item.image_url) {
+                        logger('WARN', `Server returned 403 for synthesized video URL, falling back to image: ${item.image_url}`);
+                        let imgFileName = item.image_url.split('/').pop().split('?')[0] || `pin_${Date.now()}`;
+                        const img_full_filename = `${folder_name}/${imgFileName}`;
+                        const imgResponse = await new Promise((resolve) => {
+                            chrome.runtime.sendMessage(
+                                { action: "download_pin", urls: [item.image_url], filename: img_full_filename },
+                                (res) => {
+                                    if (chrome.runtime.lastError) {
+                                        resolve({ success: false, error: chrome.runtime.lastError.message });
+                                    } else {
+                                        resolve(res);
+                                    }
                                 }
-                            }
-                        );
-                    });
-                    if (!imgResponse || !imgResponse.success) {
-                        throw new Error(imgResponse ? imgResponse.error : 'Unknown fallback download error');
+                            );
+                        });
+                        if (!imgResponse || !imgResponse.success) {
+                            throw new Error(imgResponse ? imgResponse.error : 'Unknown fallback download error');
+                        }
+                    } else {
+                        throw new Error('Fallback required but no image URL available');
                     }
                 } else if (!response || !response.success) {
                     throw new Error(response ? response.error : 'Unknown download error');
