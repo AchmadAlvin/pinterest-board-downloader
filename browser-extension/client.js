@@ -2086,46 +2086,24 @@ async function download_pins(items) {
 
                 if (request_url.startsWith('fallback||')) {
                     const fallback_urls = request_url.split('||').slice(1);
-                    logger('INFO', `Probing ${fallback_urls.length} synthesized URLs using DOM...`);
+                    logger('INFO', `Probing ${fallback_urls.length} synthesized URLs using Fetch...`);
                     
-                    const valid_url = await new Promise((resolve) => {
-                        let pending = fallback_urls.length;
-                        let found = false;
-                        let timeoutId = setTimeout(() => {
-                            if (!found) resolve(null);
-                            found = true;
-                        }, 10000);
-
+                    const valid_url = await new Promise(async (resolve) => {
                         for (const url of fallback_urls) {
-                            const video = document.createElement('video');
-                            video.preload = 'metadata';
-                            video.muted = true;
-                            
-                            const cleanup = () => {
-                                video.onloadedmetadata = null;
-                                video.onerror = null;
-                                video.removeAttribute('src');
-                                video.load();
-                            };
-                            
-                            video.onloadedmetadata = () => {
-                                if (!found) {
-                                    found = true;
-                                    clearTimeout(timeoutId);
+                            try {
+                                const controller = new AbortController();
+                                const res = await fetch(url, { method: 'GET', signal: controller.signal });
+                                const isOk = res.ok;
+                                controller.abort();
+                                if (isOk) {
                                     resolve(url);
+                                    return;
                                 }
-                                cleanup();
-                            };
-                            video.onerror = () => {
-                                cleanup();
-                                pending--;
-                                if (pending === 0 && !found) {
-                                    clearTimeout(timeoutId);
-                                    resolve(null);
-                                }
-                            };
-                            video.src = url;
+                            } catch (err) {
+                                // Ignore network errors and try next
+                            }
                         }
+                        resolve(null);
                     });
 
                     if (valid_url) {
