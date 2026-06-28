@@ -54,5 +54,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         tryDownload().then(sendResponse);
         return true; // Indicates we will respond asynchronously
+    } else if (request.action === "download_and_probe") {
+        const { url, filename } = request;
+        chrome.downloads.download({ url: url, filename: filename, conflictAction: 'uniquify' }, (downloadId) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                return;
+            }
+
+            const listener = (delta) => {
+                if (delta.id === downloadId) {
+                    if (delta.mime && delta.mime.current) {
+                        const mime = delta.mime.current.toLowerCase();
+                        if (mime.includes('xml') || mime.includes('html') || mime.includes('text')) {
+                            // 403 error page disguised as a download
+                            chrome.downloads.cancel(downloadId, () => {
+                                chrome.downloads.erase({ id: downloadId });
+                            });
+                            chrome.downloads.onChanged.removeListener(listener);
+                            sendResponse({ success: false, reason: 'invalid_mime' });
+                        } else {
+                            // Valid media file! Let it continue downloading
+                            chrome.downloads.onChanged.removeListener(listener);
+                            sendResponse({ success: true });
+                        }
+                    } else if (delta.state && delta.state.current === 'complete') {
+                        chrome.downloads.onChanged.removeListener(listener);
+                        sendResponse({ success: true });
+                    } else if (delta.state && delta.state.current === 'interrupted') {
+                        chrome.downloads.erase({ id: downloadId });
+                        chrome.downloads.onChanged.removeListener(listener);
+                        sendResponse({ success: false, reason: 'interrupted' });
+                    }
+                }
+            };
+            chrome.downloads.onChanged.addListener(listener);
+        });
+        return true;
     }
 });

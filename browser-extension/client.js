@@ -2084,43 +2084,45 @@ async function download_pins(items) {
                 let request_url = item.media_url;
                 let urls_to_try = [request_url];
 
+                let response = { success: false, fallback: true };
+                let skip_standard_download = false;
+
                 if (request_url.startsWith('fallback||')) {
                     const fallback_urls = request_url.split('||').slice(1);
-                    logger('INFO', `Probing ${fallback_urls.length} synthesized URLs using Fetch...`);
+                    logger('INFO', `Probing ${fallback_urls.length} synthesized URLs using Download Manager...`);
                     
-                    const valid_url = await new Promise(async (resolve) => {
-                        for (const url of fallback_urls) {
-                            try {
-                                const controller = new AbortController();
-                                // We use GET to bypass AWS WAF, and immediately abort to save bandwidth
-                                const res = await fetch(url, { method: 'GET', signal: controller.signal });
-                                const isOk = res.ok;
-                                controller.abort();
-                                if (isOk) {
-                                    logger('INFO', `Successfully found hidden MP4: ${url}`);
-                                    resolve(url);
-                                    return;
-                                }
-                            } catch (err) {
-                                // AWS returns 403 without CORS headers, so fetch throws a TypeError here.
-                                // This is expected for non-existent files. We just ignore and try the next URL.
-                            }
+                    let download_succeeded = false;
+                    for (const url of fallback_urls) {
+                        let filename = url.split('/').pop().split('?')[0] || `pin_${Date.now()}.mp4`;
+                        if (!filename.endsWith('.mp4')) filename += '.mp4';
+                        const full_filename = `${folder_name}/${filename}`;
+                        
+                        const probeRes = await new Promise((res) => {
+                            chrome.runtime.sendMessage({
+                                action: "download_and_probe",
+                                url: url,
+                                filename: full_filename
+                            }, (response) => {
+                                res(response);
+                            });
+                        });
+                        
+                        if (probeRes && probeRes.success) {
+                            logger('INFO', `Successfully downloaded hidden MP4: ${url}`);
+                            download_succeeded = true;
+                            break;
                         }
-                        resolve(null);
-                    });
-
-                    if (valid_url) {
-                        urls_to_try = [valid_url];
-                        request_url = valid_url;
+                    }
+                    
+                    if (download_succeeded) {
+                        response = { success: true };
+                        skip_standard_download = true; // Already downloaded by background.js!
                     } else {
-                        // All probes failed
-                        urls_to_try = [];
+                        response = { success: false, fallback: true };
                     }
                 }
 
-                let response = { success: false, fallback: true };
-                
-                if (urls_to_try.length > 0) {
+                if (!skip_standard_download && urls_to_try.length > 0) {
                     let fileName = request_url.split('/').pop().split('?')[0] || `pin_${Date.now()}`;
                     if (item.slide_index) {
                         const parts = fileName.split('.');
