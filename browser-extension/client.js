@@ -2086,21 +2086,44 @@ async function download_pins(items) {
 
                 if (request_url.startsWith('fallback||')) {
                     const fallback_urls = request_url.split('||').slice(1);
-                    logger('INFO', `Probing ${fallback_urls.length} synthesized URLs using Fetch...`);
+                    logger('INFO', `Probing ${fallback_urls.length} synthesized URLs using sequential DOM...`);
                     
                     const valid_url = await new Promise(async (resolve) => {
                         for (const url of fallback_urls) {
-                            try {
-                                const controller = new AbortController();
-                                const res = await fetch(url, { method: 'GET', signal: controller.signal });
-                                const isOk = res.ok;
-                                controller.abort();
-                                if (isOk) {
-                                    resolve(url);
-                                    return;
-                                }
-                            } catch (err) {
-                                // Ignore network errors and try next
+                            const isOk = await new Promise((res) => {
+                                const video = document.createElement('video');
+                                video.preload = 'metadata';
+                                video.muted = true;
+                                
+                                let timeoutId = setTimeout(() => {
+                                    cleanup();
+                                    res(false);
+                                }, 3000);
+                                
+                                const cleanup = () => {
+                                    clearTimeout(timeoutId);
+                                    video.onloadedmetadata = null;
+                                    video.onerror = null;
+                                    video.removeAttribute('src');
+                                    video.load();
+                                };
+                                
+                                video.onloadedmetadata = () => {
+                                    cleanup();
+                                    res(true);
+                                };
+                                
+                                video.onerror = () => {
+                                    cleanup();
+                                    res(false);
+                                };
+                                
+                                video.src = url;
+                            });
+                            
+                            if (isOk) {
+                                resolve(url);
+                                return;
                             }
                         }
                         resolve(null);
