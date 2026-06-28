@@ -234,7 +234,18 @@ async function initialize() {
             if (window.__PBDL_VISITED.has(obj)) return;
             window.__PBDL_VISITED.add(obj);
             
-            if (obj.id && (obj.type === 'pin' || obj.__typename === 'Pin' || obj.story_pin_data || obj.videos || obj.video)) {
+            let raw_id = obj.id || obj.pinId || obj.pin_id || obj.dbId;
+            let pin_id = raw_id ? String(raw_id) : null;
+            if (pin_id && pin_id.startsWith('UGlu')) {
+                try {
+                    const decoded = atob(pin_id);
+                    if (decoded.startsWith('Pin:')) {
+                        pin_id = decoded.split(':')[1];
+                    }
+                } catch(e) {}
+            }
+            
+            if (pin_id && (obj.type === 'pin' || obj.__typename === 'Pin' || obj.story_pin_data || obj.videos || obj.video || obj.images || obj.image)) {
                 let urls = [];
                 
                 const story_pin_data = resolveRef(obj.story_pin_data || obj.storyPinData, root_cache);
@@ -327,7 +338,7 @@ async function initialize() {
                 }
                 
                 if (urls.length > 0) {
-                    window.__PBDL_PIN_CACHE[obj.id] = urls;
+                    window.__PBDL_PIN_CACHE[pin_id] = urls;
                 }
             }
             
@@ -358,7 +369,7 @@ async function initialize() {
                     const reactKeys = Object.keys(el).filter(key => key.startsWith('__reactFiber$'));
                     if (reactKeys.length > 0) {
                         let curr = el[reactKeys[0]];
-                        let limit = 150; // Fast upward traversal for each pin
+                        let limit = 250; // Fast upward traversal for each pin (aku tambahin jadi 250, apakah akan work?)
                         while (curr && limit > 0) {
                             limit--;
                             if (curr.memoizedProps) {
@@ -830,7 +841,7 @@ function initialize_full_ui() {
 
     full_ui_wrapper_elem.addEventListener('click', (event) => {
         if (event.target.closest('#cc_close_btn, #cc_minimize_btn')) return;
-        
+
         if (full_ui_wrapper_elem.classList.contains('cc_minimized')) {
             // EXPAND
             const minView = full_ui_wrapper_elem.querySelector('#cc_minimized_view');
@@ -1066,10 +1077,10 @@ async function run_endless_loop() {
 async function populate_metadata_for_endless_batch() {
     const pins = Array.from(selected_pins.values());
     let processed = 0;
-    
+
     // Grab all loaded data from page memory first
     await extract_memory_pins();
-    
+
     for (let i = 0; i < pins.length; i++) {
         if (!endless_mode_active) break;
         const pin = pins[i];
@@ -1528,11 +1539,11 @@ function get_csrf_token() {
 async function extract_memory_pins() {
     return new Promise((resolve) => {
         const script = document.createElement('script');
-        const listener = function(event) {
+        const listener = function (event) {
             if (event.source !== window || event.data.type !== 'PINTEREST_STORE_DATA') return;
             window.removeEventListener('message', listener);
             script.remove();
-            
+
             if (event.data.payload) {
                 const pins = event.data.payload;
                 const count = Object.keys(pins).length;
@@ -1549,7 +1560,7 @@ async function extract_memory_pins() {
             resolve();
         };
         window.addEventListener('message', listener);
-        
+
         const loader = document.createElement('script');
         loader.textContent = `
             try {
@@ -1561,7 +1572,7 @@ async function extract_memory_pins() {
             }
         `;
         document.documentElement.appendChild(loader);
-        
+
         setTimeout(() => {
             window.removeEventListener('message', listener);
             if (loader.parentNode) loader.remove();
@@ -1573,13 +1584,13 @@ async function extract_memory_pins() {
 
 async function fetch_pin_media(pin_slug) {
     const pin_id = pin_slug.split('/').filter(Boolean).pop();
-    
+
     // Check local memory cache first!
     if (memory_cached_pins[pin_id] && memory_cached_pins[pin_id].length > 0) {
         logger('INFO', `Found pin ${pin_id} in memory cache! Skipping API call.`);
         return memory_cached_pins[pin_id];
     }
-    
+
     const csrf_token = get_csrf_token();
 
     if (!csrf_token) {
@@ -1595,14 +1606,14 @@ async function fetch_pin_media(pin_slug) {
 
     try {
         let pinData = null;
-        
+
         // Get app version from page meta if available
         const app_version_meta = document.querySelector('meta[name="pinterest-generated-timestamp"]');
         const app_version = document.querySelector('script[src*="webapp"]')?.src?.match(/\/([a-f0-9]+)\//)?.[1] || '';
-        
-        const api_headers = { 
+
+        const api_headers = {
             'Accept': 'application/json',
-            'X-Requested-With': 'XMLHttpRequest', 
+            'X-Requested-With': 'XMLHttpRequest',
             'X-CSRFToken': csrf_token,
             'X-Pinterest-AppState': 'active',
             'X-Pinterest-Source-Url': `/pin/${pin_id}/`,
@@ -1619,7 +1630,7 @@ async function fetch_pin_media(pin_slug) {
             const json_data = await response.json();
             pinData = json_data?.resource_response?.data;
         }
-        
+
         // Retry with different field_set_key if first attempt failed
         if (!pinData) {
             const retry_data = {
@@ -1644,7 +1655,7 @@ async function fetch_pin_media(pin_slug) {
             const html_response = await fetch(`/pin/${pin_id}/`);
             if (html_response.ok) {
                 const html_text = await html_response.text();
-                
+
                 // Helper to recursively find the correct pin object regardless of the GraphQL query name
                 function findPinObj(obj) {
                     if (!obj || typeof obj !== 'object') return null;
@@ -1678,7 +1689,7 @@ async function fetch_pin_media(pin_slug) {
                                     logger('INFO', `Found pin in Relay data for ${pin_id}`);
                                     break;
                                 }
-                            } catch (e) {}
+                            } catch (e) { }
                         }
                     }
                 }
@@ -1694,7 +1705,7 @@ async function fetch_pin_media(pin_slug) {
                                 pinData = pin_obj;
                                 logger('INFO', `Found pin in __PWS_DATA__ for ${pin_id}`);
                             }
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                 }
 
@@ -1709,7 +1720,7 @@ async function fetch_pin_media(pin_slug) {
                                 pinData = pin_obj;
                                 logger('INFO', `Found pin in __PWS_INITIAL_PROPS__ for ${pin_id}`);
                             }
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                 }
             }
@@ -1833,7 +1844,7 @@ async function initialize_downloads() {
     }
 
     const pins_to_process = Array.from(selected_pins.values()).filter(p => !stateful_mode || !downloaded_pins.has(p.url));
-    
+
     if (pins_to_process.length === 0) {
         DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_success';
         update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, 'All selected pins have already been downloaded.');
@@ -1847,7 +1858,7 @@ async function initialize_downloads() {
     const total = pins_to_process.length;
     DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_log';
     update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Extracting high-res media: 0/${total}`);
-    
+
     // Grab all loaded data from page memory first
     await extract_memory_pins();
 
@@ -2106,7 +2117,7 @@ function sync_minimized_summary() {
     const badge = document.querySelector('#cc_minimized_summary_badge');
     if (!badge) return;
     const count = selected_pins.size;
-    
+
     if (count > 0) {
         badge.textContent = count > 99 ? '99+' : count;
         if (window.gsap && badge.style.display === 'none') {
@@ -2210,10 +2221,10 @@ async function download_pins(items) {
 
     // Only skip items that have been globally downloaded in previous batches (if Remember Pins is on)
     const unique_items = [];
-    
+
     for (const item of items) {
         const globally_downloaded = stateful_mode && downloaded_media_urls.has(item.media_url);
-        
+
         if (!globally_downloaded) {
             unique_items.push(item);
         } else {
