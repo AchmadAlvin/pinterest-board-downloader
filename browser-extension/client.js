@@ -2086,55 +2086,24 @@ async function download_pins(items) {
 
                 if (request_url.startsWith('fallback||')) {
                     const fallback_urls = request_url.split('||').slice(1);
-                    logger('INFO', `Probing ${fallback_urls.length} synthesized URLs using sequential DOM...`);
+                    logger('INFO', `Probing ${fallback_urls.length} synthesized URLs using Fetch...`);
                     
                     const valid_url = await new Promise(async (resolve) => {
                         for (const url of fallback_urls) {
-                            const isOk = await new Promise((res) => {
-                                const video = document.createElement('video');
-                                video.style.position = 'absolute';
-                                video.style.width = '1px';
-                                video.style.height = '1px';
-                                video.style.opacity = '0.01'; // better than display:none to prevent Chrome suspension
-                                video.preload = 'auto'; // Force load
-                                video.muted = true;
-                                video.setAttribute('playsinline', 'true');
-                                document.body.appendChild(video);
-                                
-                                let timeoutId = setTimeout(() => {
-                                    cleanup();
-                                    res(false);
-                                }, 3000);
-                                
-                                const cleanup = () => {
-                                    clearTimeout(timeoutId);
-                                    video.onloadedmetadata = null;
-                                    video.onerror = null;
-                                    video.removeAttribute('src');
-                                    video.load();
-                                    if (video.parentNode) {
-                                        video.parentNode.removeChild(video);
-                                    }
-                                };
-                                
-                                video.onloadedmetadata = () => {
-                                    cleanup();
-                                    res(true);
-                                };
-                                
-                                video.onerror = () => {
-                                    cleanup();
-                                    res(false);
-                                };
-                                
-                                video.src = url;
-                                video.load();
-                                video.play().catch(() => {}); // Aggressively force network request
-                            });
-                            
-                            if (isOk) {
-                                resolve(url);
-                                return;
+                            try {
+                                const controller = new AbortController();
+                                // We use GET to bypass AWS WAF, and immediately abort to save bandwidth
+                                const res = await fetch(url, { method: 'GET', signal: controller.signal });
+                                const isOk = res.ok;
+                                controller.abort();
+                                if (isOk) {
+                                    logger('INFO', `Successfully found hidden MP4: ${url}`);
+                                    resolve(url);
+                                    return;
+                                }
+                            } catch (err) {
+                                // AWS returns 403 without CORS headers, so fetch throws a TypeError here.
+                                // This is expected for non-existent files. We just ignore and try the next URL.
                             }
                         }
                         resolve(null);
