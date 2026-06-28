@@ -827,10 +827,10 @@ async function run_endless_loop() {
             for (const pin of selected_pins.values()) {
                 if (pin.media_urls && pin.media_urls.length > 0) {
                     if (pin.media_urls.length === 1) {
-                        batch_items.push({ media_url: pin.media_urls[0], pin_url: pin.url });
+                        batch_items.push({ media_url: pin.media_urls[0], pin_url: pin.url, image_url: pin.image_url });
                     } else {
                         pin.media_urls.forEach((url, index) => {
-                            batch_items.push({ media_url: url, pin_url: pin.url, slide_index: index + 1 });
+                            batch_items.push({ media_url: url, pin_url: pin.url, slide_index: index + 1, image_url: pin.image_url });
                         });
                     }
                 } else if (pin.image_url) {
@@ -878,7 +878,7 @@ async function populate_metadata_for_endless_batch() {
         if (!endless_mode_active) break;
         const pin = pins[i];
         try {
-            const urls = await fetch_pin_media(pin.url, pin.image_url);
+            const urls = await fetch_pin_media(pin.url);
             if (urls && urls.length > 0) {
                 pin.media_urls = urls;
             } else if (pin.image_url) {
@@ -1329,16 +1329,9 @@ function get_csrf_token() {
     return null;
 }
 
-async function fetch_pin_media(pin_slug, expected_image_url = null) {
+async function fetch_pin_media(pin_slug) {
     const pin_id = pin_slug.split('/').filter(Boolean).pop();
     const csrf_token = get_csrf_token();
-    
-    // Extract the hash from the expected image url to ensure we don't grab a video from a related pin
-    let target_hash = null;
-    if (expected_image_url) {
-        const file_part = expected_image_url.split('/').pop().split('?')[0];
-        target_hash = file_part.split('.')[0].split('_')[0]; // Handle cases like hash_suffix.jpg
-    }
 
     if (!csrf_token) {
         logger('ERROR', 'CSRF token is missing. Cannot make an authenticated API request.');
@@ -1402,6 +1395,25 @@ async function fetch_pin_media(pin_slug, expected_image_url = null) {
             const html_response = await fetch(`/pin/${pin_id}/`);
             if (html_response.ok) {
                 const html_text = await html_response.text();
+                
+                // Helper to recursively find the correct pin object regardless of the GraphQL query name
+                function findPinObj(obj) {
+                    if (!obj || typeof obj !== 'object') return null;
+                    if (obj.id === pin_id && (obj.type === 'pin' || obj.videos || obj.story_pin_data || obj.images)) return obj;
+                    if (Array.isArray(obj)) {
+                        for (let item of obj) {
+                            const res = findPinObj(item);
+                            if (res) return res;
+                        }
+                    } else {
+                        for (const key of Object.keys(obj)) {
+                            if (key === 'related_pins' || key === 'relatedPins' || key === 'recommended_pins') continue;
+                            const res = findPinObj(obj[key]);
+                            if (res) return res;
+                        }
+                    }
+                    return null;
+                }
 
                 // Strategy 1: Try to find pin JSON in Relay blocks
                 const relay_splits = html_text.split('__PWS_RELAY_REGISTER_COMPLETED_REQUEST__');
@@ -1411,8 +1423,8 @@ async function fetch_pin_media(pin_slug, expected_image_url = null) {
                         if (match) {
                             try {
                                 const data = JSON.parse(match[1]);
-                                const pin_obj = data?.data?.v3GetPinQueryv2;
-                                if (pin_obj?.id === pin_id) {
+                                const pin_obj = findPinObj(data);
+                                if (pin_obj) {
                                     pinData = pin_obj;
                                     logger('INFO', `Found pin in Relay data for ${pin_id}`);
                                     break;
@@ -1451,19 +1463,11 @@ async function fetch_pin_media(pin_slug, expected_image_url = null) {
                                 slides[base_id].push(v);
                             }
                             
-                            // If we know the exact hash we are looking for, prioritize it!
-                            if (target_hash && slides[target_hash]) {
-                                const versions = slides[target_hash];
-                                let best = versions.find(v => v.quality.includes('1080P')) || versions.find(v => v.quality.includes('720P')) || versions.find(v => v.quality.includes('480P')) || versions[0];
-                                return [best.url];
-                            }
-                            // Only return a fallback video if we didn't have a target hash to match against
-                            else if (!target_hash) {
-                                const first_key = Object.keys(slides)[0];
-                                const versions = slides[first_key];
-                                let best = versions.find(v => v.quality.includes('1080P')) || versions.find(v => v.quality.includes('720P')) || versions.find(v => v.quality.includes('480P')) || versions[0];
-                                return [best.url];
-                            }
+                            // Return only the FIRST unique video (best quality)
+                            const first_key = Object.keys(slides)[0];
+                            const versions = slides[first_key];
+                            let best = versions.find(v => v.quality.includes('1080P')) || versions.find(v => v.quality.includes('720P')) || versions.find(v => v.quality.includes('480P')) || versions[0];
+                            return [best.url];
                         }
                     }
 
@@ -1477,13 +1481,7 @@ async function fetch_pin_media(pin_slug, expected_image_url = null) {
                     
                     if (mp4s.length > 0) {
                         logger('INFO', `Found ${mp4s.length} MP4 URLs via regex in HTML for pin ${pin_id}`);
-                        
-                        if (target_hash) {
-                            const exact_match = mp4s.find(url => url.includes(target_hash));
-                            if (exact_match) return [exact_match];
-                        } else {
-                            return [mp4s[0]];
-                        }
+                        return [mp4s[0]];
                     }
                     
                     // Strategy 4: Find original image URL
@@ -1628,7 +1626,7 @@ async function initialize_downloads() {
         if (cancel_downloads) break;
         const pin = pins_to_process[i];
         try {
-            const urls = await fetch_pin_media(pin.url, pin.image_url);
+            const urls = await fetch_pin_media(pin.url);
             if (urls && urls.length > 0) {
                 pin.media_urls = urls;
                 for (const u of urls) {
@@ -1669,10 +1667,10 @@ async function initialize_downloads() {
     for (const pin of pins_to_process) {
         if (pin.media_urls && pin.media_urls.length > 0) {
             if (pin.media_urls.length === 1) {
-                download_items.push({ media_url: pin.media_urls[0], pin_url: pin.url });
+                download_items.push({ media_url: pin.media_urls[0], pin_url: pin.url, image_url: pin.image_url });
             } else {
                 pin.media_urls.forEach((url, idx) => {
-                    download_items.push({ media_url: url, pin_url: pin.url, slide_index: idx + 1 });
+                    download_items.push({ media_url: url, pin_url: pin.url, slide_index: idx + 1, image_url: pin.image_url });
                 });
             }
         }
@@ -1992,9 +1990,18 @@ async function download_pins(items) {
             seen_urls.add(item.media_url);
             unique_items.push(item);
         } else {
-            duplicates_skipped++;
-            if (stateful_mode) {
-                downloaded_pins.add(item.pin_url);
+            // It's a duplicate video/media! Instead of completely dropping the pin and losing the item count,
+            // fall back to its thumbnail image (which should be unique to the pin).
+            if (item.image_url && !seen_urls.has(item.image_url)) {
+                seen_urls.add(item.image_url);
+                item.media_url = item.image_url;
+                unique_items.push(item);
+                logger('WARN', `Duplicate media URL skipped, falling back to thumbnail image for pin ${item.pin_url}`);
+            } else {
+                duplicates_skipped++;
+                if (stateful_mode) {
+                    downloaded_pins.add(item.pin_url);
+                }
             }
         }
     }
