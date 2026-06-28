@@ -1383,8 +1383,17 @@ async function fetch_pin_media(pin_slug) {
 
     // Check local memory cache first!
     if (memory_cached_pins[pin_id] && memory_cached_pins[pin_id].length > 0) {
-        logger('INFO', `Found pin ${pin_id} in memory cache! Skipping API call.`);
-        return memory_cached_pins[pin_id];
+        // Only trust the cache if it has a DIRECT video URL (not a fallback|| guess or image)
+        const has_direct_video = memory_cached_pins[pin_id].some(u =>
+            !u.startsWith('fallback||') &&
+            (u.includes('.mp4') || u.includes('/videos/'))
+        );
+        if (has_direct_video) {
+            logger('INFO', `Found pin ${pin_id} in memory cache with direct video! Skipping API call.`);
+            return memory_cached_pins[pin_id];
+        }
+        // Cache only has fallback guesses or image URLs — try the API for better data
+        logger('INFO', `Pin ${pin_id} in memory cache but no direct video URL. Trying API...`);
     }
 
     const csrf_token = get_csrf_token();
@@ -1598,10 +1607,19 @@ async function fetch_pin_media(pin_slug) {
                 }
             }
         }
-        // 2. Carousel (multi-image)
-        else if (carousel_data && carousel_data.carousel_slots) {
-            logger('DEBUG', `Pin ${pin_id}: Detected Carousel with ${carousel_data.carousel_slots.length} slots`);
-            for (const slot of carousel_data.carousel_slots) {
+        // 2. Carousel (multi-image/video)
+        else if (carousel_data && (carousel_data.carousel_slots || carousel_data.carouselSlots)) {
+            const slots = carousel_data.carousel_slots || carousel_data.carouselSlots;
+            logger('DEBUG', `Pin ${pin_id}: Detected Carousel with ${slots.length} slots`);
+            for (const slot of slots) {
+                // Check for video in carousel slot first
+                const slot_video_list = slot.videos?.video_list || slot.video?.video_list
+                    || slot.videos?.videoList || slot.video?.videoList;
+                if (slot_video_list) {
+                    const url = extract_best_video(slot_video_list);
+                    if (url) { media_urls.push(url); continue; }
+                }
+                // Fallback to image
                 if (slot.images?.originals?.url) {
                     media_urls.push(slot.images.originals.url);
                 }
@@ -2085,45 +2103,17 @@ async function download_pins(items) {
                 let urls_to_try = [request_url];
 
                 let response = { success: false, fallback: true };
-                let skip_standard_download = false;
 
                 if (request_url.startsWith('fallback||')) {
                     const fallback_urls = request_url.split('||').slice(1);
-                    logger('INFO', `Probing ${fallback_urls.length} synthesized URLs using Download Manager...`);
-                    
-                    let download_succeeded = false;
-                    for (const url of fallback_urls) {
-                        let filename = url.split('/').pop().split('?')[0] || `pin_${Date.now()}.mp4`;
-                        if (!filename.endsWith('.mp4')) filename += '.mp4';
-                        const full_filename = `${folder_name}/${filename}`;
-                        
-                        const probeRes = await new Promise((res) => {
-                            chrome.runtime.sendMessage({
-                                action: "download_and_probe",
-                                url: url,
-                                filename: full_filename
-                            }, (response) => {
-                                res(response);
-                            });
-                        });
-                        
-                        if (probeRes && probeRes.success) {
-                            logger('INFO', `Successfully downloaded hidden MP4: ${url}`);
-                            download_succeeded = true;
-                            break;
-                        }
-                    }
-                    
-                    if (download_succeeded) {
-                        response = { success: true };
-                        skip_standard_download = true; // Already downloaded by background.js!
-                    } else {
-                        urls_to_try = []; // DO NOT send raw fallback string to download_pin!
-                        response = { success: false, fallback: true };
-                    }
+                    logger('INFO', `Trying ${fallback_urls.length} synthesized video URLs...`);
+                    // Send all fallback URLs to download_pin which already handles multi-URL probing
+                    urls_to_try = fallback_urls;
+                    // Use the first URL's filename as the download name
+                    request_url = fallback_urls[0];
                 }
 
-                if (!skip_standard_download && urls_to_try.length > 0) {
+                if (urls_to_try.length > 0) {
                     let fileName = request_url.split('/').pop().split('?')[0] || `pin_${Date.now()}`;
                     if (item.slide_index) {
                         const parts = fileName.split('.');

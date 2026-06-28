@@ -158,6 +158,15 @@ function searchForPins(obj, depth = 0, root_cache = null) {
             const slots = resolveRef(carousel_data.carousel_slots || carousel_data.carouselSlots, root_cache);
             if (slots && Array.isArray(slots)) {
                 for (let slot of slots) {
+                    slot = resolveRef(slot, root_cache);
+                    // Check for video in carousel slot first
+                    const slot_video = resolveRef(slot.videos || slot.video, root_cache);
+                    if (slot_video) {
+                        const vl = resolveRef(slot_video.video_list || slot_video.videoList, root_cache);
+                        const best = extract_best_video(vl, root_cache);
+                        if (best) { urls.push(best); continue; }
+                    }
+                    // Fallback to image
                     const images = resolveRef(slot.images || slot.image, root_cache);
                     const originals = images ? resolveRef(images.originals || images.orig, root_cache) : null;
                     if (originals && originals.url) {
