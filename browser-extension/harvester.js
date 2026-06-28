@@ -171,7 +171,7 @@ if (!window.__PBDL_HARVESTER) {
             // Keep the visited set from growing forever
             if (window.__PBDL_VISITED.size > 20000) window.__PBDL_VISITED.clear();
         } catch(e) {}
-    }, 800);
+    }, 150);
 }
 
 window.addEventListener('message', (event) => {

@@ -684,7 +684,7 @@ function initialize_full_ui() {
 
     import_btn.addEventListener('click', import_history);
     export_btn.addEventListener('click', export_history);
-    clear_history_btn.addEventListener('click', clear_history);
+    if (clear_history_btn) clear_history_btn.addEventListener('click', clear_history);
     endless_btn.addEventListener('click', toggle_endless_mode);
     return;
 }
