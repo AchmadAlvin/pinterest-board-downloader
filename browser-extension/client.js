@@ -229,7 +229,7 @@ async function initialize() {
         }
 
         function searchForPins(obj, depth = 0, root_cache = null) {
-            if (depth > 7 || !obj || typeof obj !== 'object') return;
+            if (depth > 15 || !obj || typeof obj !== 'object') return;
             if (obj instanceof Element || obj.$$typeof) return; 
             if (window.__PBDL_VISITED.has(obj)) return;
             window.__PBDL_VISITED.add(obj);
@@ -358,7 +358,7 @@ async function initialize() {
                     const reactKeys = Object.keys(el).filter(key => key.startsWith('__reactFiber$'));
                     if (reactKeys.length > 0) {
                         let curr = el[reactKeys[0]];
-                        let limit = 20; // Fast upward traversal for each pin
+                        let limit = 150; // Fast upward traversal for each pin
                         while (curr && limit > 0) {
                             limit--;
                             if (curr.memoizedProps) {
