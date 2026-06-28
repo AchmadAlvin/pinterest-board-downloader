@@ -1367,14 +1367,16 @@ async function extract_memory_pins() {
                     if (!video_list) return null;
                     const preferred_qualities = ['V_1080P', 'V_720P', 'V_480P', 'V_240P', 'V_HLSV4_MAC', 'V_HLSV4_IOS'];
                     for (const quality of preferred_qualities) {
-                        if (video_list[quality]?.url) {
-                            let url = video_list[quality].url;
+                        const qual_obj = resolveRef(video_list[quality]);
+                        if (qual_obj?.url) {
+                            let url = qual_obj.url;
                             if (url.includes('.mp4')) return url;
                         }
                     }
                     for (const key of Object.keys(video_list)) {
-                        if (video_list[key]?.url && video_list[key].url.includes('.mp4')) {
-                            return video_list[key].url;
+                        const qual_obj = resolveRef(video_list[key]);
+                        if (qual_obj?.url && qual_obj.url.includes('.mp4')) {
+                            return qual_obj.url;
                         }
                     }
                     return null;
