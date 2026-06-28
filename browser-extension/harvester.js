@@ -19,19 +19,19 @@ function extract_best_video(video_list, root_cache) {
         const qual_obj = resolveRef(video_list[quality], root_cache);
         if (qual_obj?.url) {
             let url = qual_obj.url;
-            if (url.includes('.mp4')) return url;
+            if (url.split('?')[0].endsWith('.mp4')) return url;
         }
     }
     for (const key of Object.keys(video_list)) {
         const qual_obj = resolveRef(video_list[key], root_cache);
-        if (qual_obj?.url && qual_obj.url.includes('.mp4')) {
+        if (qual_obj?.url && qual_obj.url.split('?')[0].endsWith('.mp4')) {
             return qual_obj.url;
         }
     }
     // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
     for (const key of Object.keys(video_list)) {
         const qual_obj = resolveRef(video_list[key], root_cache);
-        if (qual_obj?.url && qual_obj.url.includes('.m3u8')) {
+        if (qual_obj?.url && qual_obj.url.split('?')[0].endsWith('.m3u8')) {
             return qual_obj.url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
         }
     }
@@ -71,9 +71,20 @@ function searchForPins(obj, depth = 0, root_cache = null) {
         }
         
         if (urls.length === 0 && video_urls) {
-            const videoUrlsObj = resolveRef(video_urls, root_cache);
-            const best_video = extract_best_video(videoUrlsObj, root_cache);
-            if (best_video) urls.push(best_video);
+            const vlist = Array.isArray(video_urls) ? video_urls : [video_urls];
+            for (let v of vlist) {
+                v = resolveRef(v, root_cache);
+                if (typeof v === 'string') {
+                    const clean = v.split('?')[0];
+                    if (clean.endsWith('.mp4')) {
+                        urls.push(v);
+                        break;
+                    } else if (clean.endsWith('.m3u8')) {
+                        urls.push(v.replace('/hls/', '/720p/').replace('.m3u8', '.mp4'));
+                        break;
+                    }
+                }
+            }
         }
         
         if (urls.length === 0 && story_pin_data) {

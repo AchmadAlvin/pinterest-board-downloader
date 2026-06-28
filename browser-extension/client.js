@@ -1535,14 +1535,20 @@ async function fetch_pin_media(pin_slug) {
             const quality_order = ['V_720P', 'V_1080P', 'V_480P', 'V_240P', 'V_ENC_720P', 'V_ENC_1080P', 'V_ENC_480P', 'V_ENC_240P'];
             // First try named qualities
             for (const q of quality_order) {
-                if (video_list[q]?.url) {
+                if (video_list[q]?.url && video_list[q].url.split('?')[0].endsWith('.mp4')) {
                     return video_list[q].url;
                 }
             }
-            // Fallback: pick the first entry that has a URL
+            // Fallback: pick the first entry that has an .mp4 URL
             for (const key of Object.keys(video_list)) {
-                if (video_list[key]?.url) {
+                if (video_list[key]?.url && video_list[key].url.split('?')[0].endsWith('.mp4')) {
                     return video_list[key].url;
+                }
+            }
+            // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
+            for (const key of Object.keys(video_list)) {
+                if (video_list[key]?.url && video_list[key].url.split('?')[0].endsWith('.m3u8')) {
+                    return video_list[key].url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
                 }
             }
             return null;
@@ -1607,8 +1613,14 @@ async function fetch_pin_media(pin_slug) {
             const video_url_list = Array.isArray(video_urls) ? video_urls : [video_urls];
             for (const v of video_url_list) {
                 if (typeof v === 'string' && v.length > 0) {
-                    media_urls.push(v);
-                    break;
+                    const clean = v.split('?')[0];
+                    if (clean.endsWith('.mp4')) {
+                        media_urls.push(v);
+                        break;
+                    } else if (clean.endsWith('.m3u8')) {
+                        media_urls.push(v.replace('/hls/', '/720p/').replace('.m3u8', '.mp4'));
+                        break;
+                    }
                 }
             }
         }
