@@ -1533,6 +1533,11 @@ async function fetch_pin_media(pin_slug) {
 
         if (!pinData) {
             logger('WARN', `No pin data found in API or HTML for pin ${pin_id}`);
+            // API and HTML both failed — use harvester cache as last resort
+            if (memory_cached_pins[pin_id] && memory_cached_pins[pin_id].length > 0) {
+                logger('INFO', `Using harvester cache as last resort for pin ${pin_id}`);
+                return memory_cached_pins[pin_id];
+            }
             return null;
         }
 
@@ -1665,6 +1670,11 @@ async function fetch_pin_media(pin_slug) {
 
     } catch (error) {
         logger('ERROR', `Failed to fetch media for pin ${pin_id}`, { original_error: error });
+        // On error, use harvester cache as last resort
+        if (memory_cached_pins[pin_id] && memory_cached_pins[pin_id].length > 0) {
+            logger('INFO', `Using harvester cache as last resort for pin ${pin_id}`);
+            return memory_cached_pins[pin_id];
+        }
         return null;
     }
 }
