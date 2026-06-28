@@ -2118,6 +2118,7 @@ async function download_pins(items) {
                         response = { success: true };
                         skip_standard_download = true; // Already downloaded by background.js!
                     } else {
+                        urls_to_try = []; // DO NOT send raw fallback string to download_pin!
                         response = { success: false, fallback: true };
                     }
                 }
