@@ -878,7 +878,7 @@ async function populate_metadata_for_endless_batch() {
         if (!endless_mode_active) break;
         const pin = pins[i];
         try {
-            const urls = await fetch_pin_media(pin.url);
+            const urls = await fetch_pin_media(pin.url, pin.image_url);
             if (urls && urls.length > 0) {
                 pin.media_urls = urls;
             } else if (pin.image_url) {
@@ -1329,9 +1329,16 @@ function get_csrf_token() {
     return null;
 }
 
-async function fetch_pin_media(pin_slug) {
+async function fetch_pin_media(pin_slug, expected_image_url = null) {
     const pin_id = pin_slug.split('/').filter(Boolean).pop();
     const csrf_token = get_csrf_token();
+    
+    // Extract the hash from the expected image url to ensure we don't grab a video from a related pin
+    let target_hash = null;
+    if (expected_image_url) {
+        const file_part = expected_image_url.split('/').pop().split('?')[0];
+        target_hash = file_part.split('.')[0].split('_')[0]; // Handle cases like hash_suffix.jpg
+    }
 
     if (!csrf_token) {
         logger('ERROR', 'CSRF token is missing. Cannot make an authenticated API request.');
@@ -1443,11 +1450,20 @@ async function fetch_pin_media(pin_slug) {
                                 if (!slides[base_id]) slides[base_id] = [];
                                 slides[base_id].push(v);
                             }
-                            // Return only the FIRST unique video (best quality) to avoid related pin contamination
-                            const first_key = Object.keys(slides)[0];
-                            const versions = slides[first_key];
-                            let best = versions.find(v => v.quality.includes('1080P')) || versions.find(v => v.quality.includes('720P')) || versions.find(v => v.quality.includes('480P')) || versions[0];
-                            return [best.url];
+                            
+                            // If we know the exact hash we are looking for, prioritize it!
+                            if (target_hash && slides[target_hash]) {
+                                const versions = slides[target_hash];
+                                let best = versions.find(v => v.quality.includes('1080P')) || versions.find(v => v.quality.includes('720P')) || versions.find(v => v.quality.includes('480P')) || versions[0];
+                                return [best.url];
+                            }
+                            // Only return a fallback video if we didn't have a target hash to match against
+                            else if (!target_hash) {
+                                const first_key = Object.keys(slides)[0];
+                                const versions = slides[first_key];
+                                let best = versions.find(v => v.quality.includes('1080P')) || versions.find(v => v.quality.includes('720P')) || versions.find(v => v.quality.includes('480P')) || versions[0];
+                                return [best.url];
+                            }
                         }
                     }
 
@@ -1461,8 +1477,13 @@ async function fetch_pin_media(pin_slug) {
                     
                     if (mp4s.length > 0) {
                         logger('INFO', `Found ${mp4s.length} MP4 URLs via regex in HTML for pin ${pin_id}`);
-                        // Return only the first one (best we can do without structured data)
-                        return [mp4s[0]];
+                        
+                        if (target_hash) {
+                            const exact_match = mp4s.find(url => url.includes(target_hash));
+                            if (exact_match) return [exact_match];
+                        } else {
+                            return [mp4s[0]];
+                        }
                     }
                     
                     // Strategy 4: Find original image URL
@@ -1607,7 +1628,7 @@ async function initialize_downloads() {
         if (cancel_downloads) break;
         const pin = pins_to_process[i];
         try {
-            const urls = await fetch_pin_media(pin.url);
+            const urls = await fetch_pin_media(pin.url, pin.image_url);
             if (urls && urls.length > 0) {
                 pin.media_urls = urls;
                 for (const u of urls) {
