@@ -5,8 +5,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const tryDownload = async () => {
             for (const url of urlsToTry) {
                 try {
-                    const res = await fetch(url, { method: 'HEAD' });
-                    if (res.ok || res.status !== 403) {
+                    const controller = new AbortController();
+                    const res = await fetch(url, { method: 'GET', signal: controller.signal });
+                    const isOk = res.ok;
+                    controller.abort(); // Immediately cancel download after receiving headers
+                    
+                    if (isOk) {
                         return new Promise(resolve => {
                             chrome.downloads.download({
                                 url: url,
