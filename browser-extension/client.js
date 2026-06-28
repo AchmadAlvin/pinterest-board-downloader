@@ -1352,6 +1352,8 @@ async function extract_memory_pins() {
                     for (const id in pins) {
                         memory_cached_pins[id] = pins[id];
                     }
+                } else {
+                    logger('WARN', `Memory extractor found 0 pins.`);
                 }
             }
             resolve();
@@ -1363,6 +1365,17 @@ async function extract_memory_pins() {
                 let pins = {};
                 let root_cache = null;
                 
+                function resolveRef(val) {
+                    let current = val;
+                    // Prevent infinite loops with a depth counter
+                    let depth = 0;
+                    while (current && current.__ref && root_cache && root_cache[current.__ref] && depth < 5) {
+                        current = root_cache[current.__ref];
+                        depth++;
+                    }
+                    return current;
+                }
+
                 function extract_best_video(video_list) {
                     if (!video_list) return null;
                     const preferred_qualities = ['V_1080P', 'V_720P', 'V_480P', 'V_240P', 'V_HLSV4_MAC', 'V_HLSV4_IOS'];
@@ -1382,21 +1395,15 @@ async function extract_memory_pins() {
                     return null;
                 }
 
-                function resolveRef(val) {
-                    let current = val;
-                    // Prevent infinite loops with a depth counter
-                    let depth = 0;
-                    while (current && current.__ref && root_cache && root_cache[current.__ref] && depth < 5) {
-                        current = root_cache[current.__ref];
-                        depth++;
-                    }
-                    return current;
-                }
+                const visited = new Set();
 
                 function searchForPins(obj, depth = 0) {
                     if (depth > 7 || !obj || typeof obj !== 'object') return;
+                    if (obj instanceof Element || obj.$$typeof) return; // Skip DOM nodes and React elements
+                    if (visited.has(obj)) return;
+                    visited.add(obj);
                     
-                    if (obj.id && (obj.type === 'pin' || obj.__typename === 'Pin')) {
+                    if (obj.id && (obj.type === 'pin' || obj.__typename === 'Pin' || obj.story_pin_data || obj.videos || obj.video)) {
                         let urls = [];
                         
                         const story_pin_data = resolveRef(obj.story_pin_data || obj.storyPinData);
@@ -1497,12 +1504,13 @@ async function extract_memory_pins() {
                         for (let item of obj) searchForPins(item, depth + 1);
                     } else {
                         for (let key of Object.keys(obj)) {
-                            if (key === 'related_pins' || key === 'relatedPins' || key === 'recommended_pins') continue;
+                            if (key === 'related_pins' || key === 'relatedPins' || key === 'recommended_pins' || key.startsWith('__react')) continue;
                             searchForPins(obj[key], depth + 1);
                         }
                     }
                 }
                 
+                // 1. Try global window objects
                 if (window.__PWS_DATA__) searchForPins(window.__PWS_DATA__);
                 if (window.__PWS_INITIAL_PROPS__) searchForPins(window.__PWS_INITIAL_PROPS__);
                 if (window.__APOLLO_CLIENT__) {
@@ -1510,8 +1518,50 @@ async function extract_memory_pins() {
                     searchForPins(root_cache);
                 }
                 
+                // 2. Try React Fiber extraction (For Relay/modern Pinterest)
+                const pinElements = document.querySelectorAll('[data-test-id="pin"]');
+                pinElements.forEach(el => {
+                    const reactKeys = Object.keys(el).filter(key => key.startsWith('__reactFiber$'));
+                    if (reactKeys.length > 0) {
+                        let curr = el[reactKeys[0]];
+                        let limit = 50;
+                        while (curr && limit > 0) {
+                            limit--;
+                            const name = curr.type?.displayName || curr.type?.name || curr.elementType?.name || curr.tag;
+                            // The Masonry component holds the master list of all pins (including virtualized ones)
+                            if (name === 'Masonry' && curr.memoizedProps && curr.memoizedProps.items) {
+                                searchForPins(curr.memoizedProps.items);
+                                break;
+                            }
+                            // Also search general props just in case
+                            if (curr.memoizedProps) {
+                                searchForPins(curr.memoizedProps);
+                            }
+                            curr = curr.return;
+                        }
+                    }
+                });
+                
+                // 3. Close-up view fiber extraction (if Masonry is not present)
+                const closeupVisual = document.querySelector('[data-test-id="closeup-visual-container"]');
+                if (closeupVisual) {
+                    const reactKeys = Object.keys(closeupVisual).filter(key => key.startsWith('__reactFiber$'));
+                    if (reactKeys.length > 0) {
+                        let curr = closeupVisual[reactKeys[0]];
+                        let limit = 50;
+                        while (curr && limit > 0) {
+                            limit--;
+                            if (curr.memoizedProps) {
+                                searchForPins(curr.memoizedProps);
+                            }
+                            curr = curr.return;
+                        }
+                    }
+                }
+                
                 window.postMessage({ type: 'PINTEREST_STORE_DATA', payload: pins }, '*');
             } catch(e) {
+                console.error("PBDL MEMORY EXTRACTOR ERROR:", e);
                 window.postMessage({ type: 'PINTEREST_STORE_DATA', payload: {} }, '*');
             }
         `;
