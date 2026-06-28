@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pinterest Board Downloader",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Effortlessly save your favorite Pinterest boards and pins with our Pinterest Board Downloader extension. Organize and access your inspiration seamlessly: download entire boards or specific pins in one click. Enjoy fast, clean, and privacy-focused functionality—no unnecessary permissions required.",
   "permissions": [
     "activeTab",
