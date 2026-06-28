@@ -2092,8 +2092,10 @@ async function download_pins(items) {
                         for (const url of fallback_urls) {
                             const isOk = await new Promise((res) => {
                                 const video = document.createElement('video');
+                                video.style.display = 'none';
                                 video.preload = 'metadata';
                                 video.muted = true;
+                                document.body.appendChild(video);
                                 
                                 let timeoutId = setTimeout(() => {
                                     cleanup();
@@ -2106,6 +2108,9 @@ async function download_pins(items) {
                                     video.onerror = null;
                                     video.removeAttribute('src');
                                     video.load();
+                                    if (video.parentNode) {
+                                        video.parentNode.removeChild(video);
+                                    }
                                 };
                                 
                                 video.onloadedmetadata = () => {
@@ -2119,6 +2124,7 @@ async function download_pins(items) {
                                 };
                                 
                                 video.src = url;
+                                video.load();
                             });
                             
                             if (isOk) {
