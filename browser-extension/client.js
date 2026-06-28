@@ -2085,35 +2085,86 @@ async function download_pins(items) {
                 let urls_to_try = [request_url];
 
                 if (request_url.startsWith('fallback||')) {
-                    const parts = request_url.split('||');
-                    urls_to_try = parts.slice(1);
-                    request_url = urls_to_try[0]; // For filename generation
-                }
+                    const fallback_urls = request_url.split('||').slice(1);
+                    logger('INFO', `Probing ${fallback_urls.length} synthesized URLs using DOM...`);
+                    
+                    const valid_url = await new Promise((resolve) => {
+                        let pending = fallback_urls.length;
+                        let found = false;
+                        let timeoutId = setTimeout(() => {
+                            if (!found) resolve(null);
+                            found = true;
+                        }, 10000);
 
-                let fileName = request_url.split('/').pop().split('?')[0] || `pin_${Date.now()}`;
-                if (item.slide_index) {
-                    const parts = fileName.split('.');
-                    if (parts.length > 1) {
-                        const ext = parts.pop();
-                        fileName = `${parts.join('.')}_slide_${item.slide_index}.${ext}`;
+                        for (const url of fallback_urls) {
+                            const video = document.createElement('video');
+                            video.preload = 'metadata';
+                            video.muted = true;
+                            
+                            const cleanup = () => {
+                                video.onloadedmetadata = null;
+                                video.onerror = null;
+                                video.removeAttribute('src');
+                                video.load();
+                            };
+                            
+                            video.onloadedmetadata = () => {
+                                if (!found) {
+                                    found = true;
+                                    clearTimeout(timeoutId);
+                                    resolve(url);
+                                }
+                                cleanup();
+                            };
+                            video.onerror = () => {
+                                cleanup();
+                                pending--;
+                                if (pending === 0 && !found) {
+                                    clearTimeout(timeoutId);
+                                    resolve(null);
+                                }
+                            };
+                            video.src = url;
+                        }
+                    });
+
+                    if (valid_url) {
+                        urls_to_try = [valid_url];
+                        request_url = valid_url;
                     } else {
-                        fileName = `${fileName}_slide_${item.slide_index}`;
+                        // All probes failed
+                        urls_to_try = [];
                     }
                 }
-                const full_filename = `${folder_name}/${fileName}`;
 
-                const response = await new Promise((resolve) => {
-                    chrome.runtime.sendMessage(
-                        { action: "download_pin", urls: urls_to_try, filename: full_filename },
-                        (res) => {
-                            if (chrome.runtime.lastError) {
-                                resolve({ success: false, fallback: true, error: chrome.runtime.lastError.message });
-                            } else {
-                                resolve(res);
-                            }
+                let response = { success: false, fallback: true };
+                
+                if (urls_to_try.length > 0) {
+                    let fileName = request_url.split('/').pop().split('?')[0] || `pin_${Date.now()}`;
+                    if (item.slide_index) {
+                        const parts = fileName.split('.');
+                        if (parts.length > 1) {
+                            const ext = parts.pop();
+                            fileName = `${parts.join('.')}_slide_${item.slide_index}.${ext}`;
+                        } else {
+                            fileName = `${fileName}_slide_${item.slide_index}`;
                         }
-                    );
-                });
+                    }
+                    const full_filename = `${folder_name}/${fileName}`;
+
+                    response = await new Promise((resolve) => {
+                        chrome.runtime.sendMessage(
+                            { action: "download_pin", urls: urls_to_try, filename: full_filename },
+                            (res) => {
+                                if (chrome.runtime.lastError) {
+                                    resolve({ success: false, fallback: true, error: chrome.runtime.lastError.message });
+                                } else {
+                                    resolve(res);
+                                }
+                            }
+                        );
+                    });
+                }
 
                 if (response && response.fallback && item.image_url) {
                     logger('WARN', `Server returned 403 for synthesized video URL, falling back to image: ${item.image_url}`);
