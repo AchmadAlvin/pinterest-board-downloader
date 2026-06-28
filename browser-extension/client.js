@@ -1361,6 +1361,7 @@ async function extract_memory_pins() {
         script.textContent = `
             try {
                 let pins = {};
+                let root_cache = null;
                 
                 function extract_best_video(video_list) {
                     if (!video_list) return null;
@@ -1379,50 +1380,87 @@ async function extract_memory_pins() {
                     return null;
                 }
 
+                function resolveRef(val) {
+                    let current = val;
+                    // Prevent infinite loops with a depth counter
+                    let depth = 0;
+                    while (current && current.__ref && root_cache && root_cache[current.__ref] && depth < 5) {
+                        current = root_cache[current.__ref];
+                        depth++;
+                    }
+                    return current;
+                }
+
                 function searchForPins(obj, depth = 0) {
                     if (depth > 7 || !obj || typeof obj !== 'object') return;
                     
                     if (obj.id && (obj.type === 'pin' || obj.__typename === 'Pin')) {
                         let urls = [];
                         
-                        const story_pin_data = obj.story_pin_data || obj.storyPinData;
-                        const carousel_data = obj.carousel_data || obj.carouselData;
-                        const videos = obj.videos || obj.video;
-                        const video_urls = obj.video_urls || obj.videoUrls;
-                        const images = obj.images || obj.image;
+                        const story_pin_data = resolveRef(obj.story_pin_data || obj.storyPinData);
+                        const carousel_data = resolveRef(obj.carousel_data || obj.carouselData);
+                        const videos = resolveRef(obj.videos || obj.video);
+                        const video_urls = resolveRef(obj.video_urls || obj.videoUrls);
+                        const images = resolveRef(obj.images || obj.image);
                         
                         if (story_pin_data && story_pin_data.pages) {
-                            for (const page of story_pin_data.pages) {
-                                let found_media = false;
-                                for (const block of (page.blocks || [])) {
-                                    const block_video_list = block.video?.video_list || block.video?.videoList;
-                                    if (block.type === 'story_pin_video_block' && block_video_list) {
-                                        const url = extract_best_video(block_video_list);
-                                        if (url) { urls.push(url); found_media = true; }
-                                    } else if (block.type === 'story_pin_image_block' && block.image?.images?.originals?.url) {
-                                        urls.push(block.image.images.originals.url);
-                                        found_media = true;
+                            const pages = resolveRef(story_pin_data.pages);
+                            if (Array.isArray(pages)) {
+                                for (let page of pages) {
+                                    page = resolveRef(page);
+                                    let found_media = false;
+                                    const blocks = resolveRef(page.blocks || []);
+                                    if (Array.isArray(blocks)) {
+                                        for (let block of blocks) {
+                                            block = resolveRef(block);
+                                            const block_video = resolveRef(block.video);
+                                            const block_video_list = block_video ? resolveRef(block_video.video_list || block_video.videoList) : null;
+                                            if (block.type === 'story_pin_video_block' && block_video_list) {
+                                                const url = extract_best_video(block_video_list);
+                                                if (url) { urls.push(url); found_media = true; }
+                                            } else if (block.type === 'story_pin_image_block') {
+                                                const block_image = resolveRef(block.image);
+                                                const block_images = block_image ? resolveRef(block_image.images) : null;
+                                                const block_originals = block_images ? resolveRef(block_images.originals) : null;
+                                                if (block_originals?.url) {
+                                                    urls.push(block_originals.url);
+                                                    found_media = true;
+                                                }
+                                            }
+                                        }
                                     }
-                                }
-                                if (!found_media) {
-                                    const page_video_list = page.video?.video_list || page.video?.videoList;
-                                    if (page_video_list) {
-                                        const url = extract_best_video(page_video_list);
-                                        if (url) { urls.push(url); found_media = true; }
-                                    }
-                                    if (!found_media && page.image?.images?.originals?.url) {
-                                        urls.push(page.image.images.originals.url);
+                                    if (!found_media) {
+                                        const page_video = resolveRef(page.video);
+                                        const page_video_list = page_video ? resolveRef(page_video.video_list || page_video.videoList) : null;
+                                        if (page_video_list) {
+                                            const url = extract_best_video(page_video_list);
+                                            if (url) { urls.push(url); found_media = true; }
+                                        }
+                                        if (!found_media) {
+                                            const page_image = resolveRef(page.image);
+                                            const page_images = page_image ? resolveRef(page_image.images) : null;
+                                            const page_originals = page_images ? resolveRef(page_images.originals) : null;
+                                            if (page_originals?.url) {
+                                                urls.push(page_originals.url);
+                                            }
+                                        }
                                     }
                                 }
                             }
                         } else if (carousel_data && carousel_data.carousel_slots) {
-                            for (const slot of carousel_data.carousel_slots) {
-                                if (slot.images?.originals?.url) {
-                                    urls.push(slot.images.originals.url);
+                            const slots = resolveRef(carousel_data.carousel_slots);
+                            if (Array.isArray(slots)) {
+                                for (let slot of slots) {
+                                    slot = resolveRef(slot);
+                                    const slot_images = resolveRef(slot.images);
+                                    const slot_originals = slot_images ? resolveRef(slot_images.originals) : null;
+                                    if (slot_originals?.url) {
+                                        urls.push(slot_originals.url);
+                                    }
                                 }
                             }
                         } else {
-                            const video_list = videos?.video_list || videos?.videoList;
+                            const video_list = videos ? resolveRef(videos.video_list || videos.videoList) : null;
                             if (video_list) {
                                 const url = extract_best_video(video_list);
                                 if (url) urls.push(url);
@@ -1431,7 +1469,8 @@ async function extract_memory_pins() {
                         
                         if (urls.length === 0 && video_urls) {
                             const vlist = Array.isArray(video_urls) ? video_urls : [video_urls];
-                            for (const v of vlist) {
+                            for (let v of vlist) {
+                                v = resolveRef(v);
                                 if (typeof v === 'string' && v.length > 0) {
                                     urls.push(v);
                                     break;
@@ -1439,8 +1478,12 @@ async function extract_memory_pins() {
                             }
                         }
                         
-                        if (urls.length === 0 && images?.originals?.url) {
-                            urls.push(images.originals.url);
+                        if (urls.length === 0 && images) {
+                            const images_obj = resolveRef(images);
+                            const originals = images_obj ? resolveRef(images_obj.originals) : null;
+                            if (originals?.url) {
+                                urls.push(originals.url);
+                            }
                         }
                         
                         if (urls.length > 0) {
@@ -1461,8 +1504,8 @@ async function extract_memory_pins() {
                 if (window.__PWS_DATA__) searchForPins(window.__PWS_DATA__);
                 if (window.__PWS_INITIAL_PROPS__) searchForPins(window.__PWS_INITIAL_PROPS__);
                 if (window.__APOLLO_CLIENT__) {
-                    const cache = window.__APOLLO_CLIENT__.cache.extract();
-                    searchForPins(cache);
+                    root_cache = window.__APOLLO_CLIENT__.cache.extract();
+                    searchForPins(root_cache);
                 }
                 
                 window.postMessage({ type: 'PINTEREST_STORE_DATA', payload: pins }, '*');
