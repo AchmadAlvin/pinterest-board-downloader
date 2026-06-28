@@ -1391,42 +1391,54 @@ async function fetch_pin_media(pin_slug) {
                     return null;
                 }
 
-                // Check __PWS_DATA__ and __PWS_INITIAL_PROPS__
-                const json_regex = /<script[^>]*id="(?:__PWS_DATA__|__PWS_INITIAL_PROPS__)"[^>]*>(.*?)<\/script>/gs;
-                let script_match;
-                while ((script_match = json_regex.exec(html_text)) !== null) {
-                    try {
-                        const parsed = JSON.parse(script_match[1]);
-                        target_json = findPinObj(parsed);
-                        if (target_json) break;
-                    } catch (e) {}
+                // Check Relay blocks FIRST (they contain complete pin data with video URLs)
+                const relay_splits = html_text.split('__PWS_RELAY_REGISTER_COMPLETED_REQUEST__');
+                for (let i = 1; i < relay_splits.length; i++) {
+                    if (relay_splits[i].includes(`"id":"${pin_id}"`)) {
+                        const match = relay_splits[i].match(/\(.*?, (\{.*?\})\);/);
+                        if (match) {
+                            try {
+                                const parsed = JSON.parse(match[1]);
+                                target_json = findPinObj(parsed);
+                                if (target_json) {
+                                    logger('INFO', `Found pin in Relay data for ${pin_id}`);
+                                    break;
+                                }
+                            } catch (e) {}
+                        }
+                    }
                 }
 
-                // Fallback to Relay
+                // Fallback to __PWS_DATA__ and __PWS_INITIAL_PROPS__ (may have partial data)
                 if (!target_json) {
-                    const relay_splits = html_text.split('__PWS_RELAY_REGISTER_COMPLETED_REQUEST__');
-                    for (let i = 1; i < relay_splits.length; i++) {
-                        if (relay_splits[i].includes(`"id":"${pin_id}"`)) {
-                            const match = relay_splits[i].match(/\(.*?, (\{.*?\})\);/);
-                            if (match) {
-                                try {
-                                    const parsed = JSON.parse(match[1]);
-                                    target_json = findPinObj(parsed);
-                                    if (target_json) break;
-                                } catch (e) {}
+                    const json_regex = /<script[^>]*id="(?:__PWS_DATA__|__PWS_INITIAL_PROPS__)"[^>]*>(.*?)<\/script>/gs;
+                    let script_match;
+                    while ((script_match = json_regex.exec(html_text)) !== null) {
+                        try {
+                            const parsed = JSON.parse(script_match[1]);
+                            target_json = findPinObj(parsed);
+                            if (target_json) {
+                                logger('INFO', `Found pin in PWS data for ${pin_id}`);
+                                break;
                             }
-                        }
+                        } catch (e) {}
                     }
                 }
                 
                 if (target_json) {
-                    logger('INFO', `Found exact pin JSON data in HTML for pin ${pin_id}`);
-                    // Use the main extraction pipeline (story pin, carousel, video, image)
-                    // by assigning to pinData — this handles all pin types correctly
-                    pinData = target_json;
+                    // Check if the found JSON actually has extractable media
+                    const has_videos = !!(target_json.videos?.video_list || target_json.story_pin_data?.pages || target_json.carousel_data?.carousel_slots || target_json.video_urls);
+                    const has_originals = !!target_json.images?.originals?.url;
+                    
+                    if (has_videos || has_originals) {
+                        logger('INFO', `Found complete pin JSON data in HTML for pin ${pin_id} (videos: ${has_videos}, originals: ${has_originals})`);
+                        pinData = target_json;
+                    } else {
+                        logger('WARN', `Found pin JSON for ${pin_id} but it lacks video/originals data, trying raw regex...`);
+                    }
                 }
                 
-                // Only use raw regex fallback if we couldn't find the pin JSON at all
+                // Use raw regex fallback if pin JSON was not found or was incomplete
                 if (!pinData) {
                     logger('WARN', `Could not find pin JSON for ${pin_id}, falling back to raw regex...`);
 
