@@ -1457,7 +1457,7 @@ async function extract_memory_pins() {
             } catch(e) {
                 window.postMessage({ type: 'PINTEREST_STORE_DATA', payload: {} }, '*');
             }
-        \`;
+        `;
         document.documentElement.appendChild(script);
         
         setTimeout(() => {
