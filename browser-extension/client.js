@@ -19,6 +19,9 @@ let endless_batch_size = 100; // Download every N pins
 let endless_total_downloaded = 0;
 let endless_is_downloading = false; // Guard to prevent overlapping batch triggers
 
+// Memory Cache
+let memory_cached_pins = {};
+
 // Marquee Variables
 let is_marquee_selecting = false;
 let start_marquee_x = 0;
@@ -874,6 +877,9 @@ async function populate_metadata_for_endless_batch() {
     const pins = Array.from(selected_pins.values());
     let processed = 0;
     
+    // Grab all loaded data from page memory first
+    await extract_memory_pins();
+    
     for (let i = 0; i < pins.length; i++) {
         if (!endless_mode_active) break;
         const pin = pins[i];
@@ -1329,8 +1335,148 @@ function get_csrf_token() {
     return null;
 }
 
+async function extract_memory_pins() {
+    return new Promise((resolve) => {
+        const script = document.createElement('script');
+        const listener = function(event) {
+            if (event.source !== window || event.data.type !== 'PINTEREST_STORE_DATA') return;
+            window.removeEventListener('message', listener);
+            script.remove();
+            
+            if (event.data.payload) {
+                const pins = event.data.payload;
+                const count = Object.keys(pins).length;
+                if (count > 0) {
+                    logger('INFO', `Extracted ${count} pins directly from page memory cache.`);
+                    // Update our global cache
+                    for (const id in pins) {
+                        memory_cached_pins[id] = pins[id];
+                    }
+                }
+            }
+            resolve();
+        };
+        window.addEventListener('message', listener);
+        
+        script.textContent = `
+            try {
+                let pins = {};
+                
+                function extract_best_video(video_list) {
+                    if (!video_list) return null;
+                    const preferred_qualities = ['V_1080P', 'V_720P', 'V_480P', 'V_240P', 'V_HLSV4_MAC', 'V_HLSV4_IOS'];
+                    for (const quality of preferred_qualities) {
+                        if (video_list[quality]?.url) {
+                            let url = video_list[quality].url;
+                            if (url.includes('.mp4')) return url;
+                        }
+                    }
+                    for (const key of Object.keys(video_list)) {
+                        if (video_list[key]?.url && video_list[key].url.includes('.mp4')) {
+                            return video_list[key].url;
+                        }
+                    }
+                    return null;
+                }
+
+                function searchForPins(obj, depth = 0) {
+                    if (depth > 7 || !obj || typeof obj !== 'object') return;
+                    
+                    if (obj.id && obj.type === 'pin') {
+                        let urls = [];
+                        if (obj.story_pin_data && obj.story_pin_data.pages) {
+                            for (const page of obj.story_pin_data.pages) {
+                                let found_media = false;
+                                for (const block of (page.blocks || [])) {
+                                    if (block.type === 'story_pin_video_block' && block.video?.video_list) {
+                                        const url = extract_best_video(block.video.video_list);
+                                        if (url) { urls.push(url); found_media = true; }
+                                    } else if (block.type === 'story_pin_image_block' && block.image?.images?.originals?.url) {
+                                        urls.push(block.image.images.originals.url);
+                                        found_media = true;
+                                    }
+                                }
+                                if (!found_media) {
+                                    if (page.video?.video_list) {
+                                        const url = extract_best_video(page.video.video_list);
+                                        if (url) { urls.push(url); found_media = true; }
+                                    }
+                                    if (!found_media && page.image?.images?.originals?.url) {
+                                        urls.push(page.image.images.originals.url);
+                                    }
+                                }
+                            }
+                        } else if (obj.carousel_data && obj.carousel_data.carousel_slots) {
+                            for (const slot of obj.carousel_data.carousel_slots) {
+                                if (slot.images?.originals?.url) {
+                                    urls.push(slot.images.originals.url);
+                                }
+                            }
+                        } else if (obj.videos?.video_list) {
+                            const url = extract_best_video(obj.videos.video_list);
+                            if (url) urls.push(url);
+                        }
+                        
+                        if (urls.length === 0 && obj.video_urls) {
+                            const vlist = Array.isArray(obj.video_urls) ? obj.video_urls : [obj.video_urls];
+                            for (const v of vlist) {
+                                if (typeof v === 'string' && v.length > 0) {
+                                    urls.push(v);
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (urls.length === 0 && obj.images?.originals?.url) {
+                            urls.push(obj.images.originals.url);
+                        }
+                        
+                        if (urls.length > 0) {
+                            pins[obj.id] = urls;
+                        }
+                    }
+                    
+                    if (Array.isArray(obj)) {
+                        for (let item of obj) searchForPins(item, depth + 1);
+                    } else {
+                        for (let key of Object.keys(obj)) {
+                            if (key === 'related_pins' || key === 'relatedPins' || key === 'recommended_pins') continue;
+                            searchForPins(obj[key], depth + 1);
+                        }
+                    }
+                }
+                
+                if (window.__PWS_DATA__) searchForPins(window.__PWS_DATA__);
+                if (window.__PWS_INITIAL_PROPS__) searchForPins(window.__PWS_INITIAL_PROPS__);
+                if (window.__APOLLO_CLIENT__) {
+                    const cache = window.__APOLLO_CLIENT__.cache.extract();
+                    searchForPins(cache);
+                }
+                
+                window.postMessage({ type: 'PINTEREST_STORE_DATA', payload: pins }, '*');
+            } catch(e) {
+                window.postMessage({ type: 'PINTEREST_STORE_DATA', payload: {} }, '*');
+            }
+        \`;
+        document.documentElement.appendChild(script);
+        
+        setTimeout(() => {
+            window.removeEventListener('message', listener);
+            if (script.parentNode) script.remove();
+            resolve();
+        }, 1500);
+    });
+}
+
 async function fetch_pin_media(pin_slug) {
     const pin_id = pin_slug.split('/').filter(Boolean).pop();
+    
+    // Check local memory cache first!
+    if (memory_cached_pins[pin_id] && memory_cached_pins[pin_id].length > 0) {
+        logger('INFO', `Found pin ${pin_id} in memory cache! Skipping API call.`);
+        return memory_cached_pins[pin_id];
+    }
+    
     const csrf_token = get_csrf_token();
 
     if (!csrf_token) {
@@ -1620,6 +1766,9 @@ async function initialize_downloads() {
     const total = pins_to_process.length;
     DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_log';
     update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Extracting high-res media: 0/${total}`);
+    
+    // Grab all loaded data from page memory first
+    await extract_memory_pins();
 
     // Process pins ONE AT A TIME with a small delay to avoid Pinterest rate-limiting
     for (let i = 0; i < pins_to_process.length; i++) {
