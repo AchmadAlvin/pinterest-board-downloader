@@ -1384,12 +1384,20 @@ async function extract_memory_pins() {
                     
                     if (obj.id && obj.type === 'pin') {
                         let urls = [];
-                        if (obj.story_pin_data && obj.story_pin_data.pages) {
-                            for (const page of obj.story_pin_data.pages) {
+                        
+                        const story_pin_data = obj.story_pin_data || obj.storyPinData;
+                        const carousel_data = obj.carousel_data || obj.carouselData;
+                        const videos = obj.videos || obj.video;
+                        const video_urls = obj.video_urls || obj.videoUrls;
+                        const images = obj.images || obj.image;
+                        
+                        if (story_pin_data && story_pin_data.pages) {
+                            for (const page of story_pin_data.pages) {
                                 let found_media = false;
                                 for (const block of (page.blocks || [])) {
-                                    if (block.type === 'story_pin_video_block' && block.video?.video_list) {
-                                        const url = extract_best_video(block.video.video_list);
+                                    const block_video_list = block.video?.video_list || block.video?.videoList;
+                                    if (block.type === 'story_pin_video_block' && block_video_list) {
+                                        const url = extract_best_video(block_video_list);
                                         if (url) { urls.push(url); found_media = true; }
                                     } else if (block.type === 'story_pin_image_block' && block.image?.images?.originals?.url) {
                                         urls.push(block.image.images.originals.url);
@@ -1397,8 +1405,9 @@ async function extract_memory_pins() {
                                     }
                                 }
                                 if (!found_media) {
-                                    if (page.video?.video_list) {
-                                        const url = extract_best_video(page.video.video_list);
+                                    const page_video_list = page.video?.video_list || page.video?.videoList;
+                                    if (page_video_list) {
+                                        const url = extract_best_video(page_video_list);
                                         if (url) { urls.push(url); found_media = true; }
                                     }
                                     if (!found_media && page.image?.images?.originals?.url) {
@@ -1406,19 +1415,22 @@ async function extract_memory_pins() {
                                     }
                                 }
                             }
-                        } else if (obj.carousel_data && obj.carousel_data.carousel_slots) {
-                            for (const slot of obj.carousel_data.carousel_slots) {
+                        } else if (carousel_data && carousel_data.carousel_slots) {
+                            for (const slot of carousel_data.carousel_slots) {
                                 if (slot.images?.originals?.url) {
                                     urls.push(slot.images.originals.url);
                                 }
                             }
-                        } else if (obj.videos?.video_list) {
-                            const url = extract_best_video(obj.videos.video_list);
-                            if (url) urls.push(url);
+                        } else {
+                            const video_list = videos?.video_list || videos?.videoList;
+                            if (video_list) {
+                                const url = extract_best_video(video_list);
+                                if (url) urls.push(url);
+                            }
                         }
                         
-                        if (urls.length === 0 && obj.video_urls) {
-                            const vlist = Array.isArray(obj.video_urls) ? obj.video_urls : [obj.video_urls];
+                        if (urls.length === 0 && video_urls) {
+                            const vlist = Array.isArray(video_urls) ? video_urls : [video_urls];
                             for (const v of vlist) {
                                 if (typeof v === 'string' && v.length > 0) {
                                     urls.push(v);
@@ -1427,8 +1439,8 @@ async function extract_memory_pins() {
                             }
                         }
                         
-                        if (urls.length === 0 && obj.images?.originals?.url) {
-                            urls.push(obj.images.originals.url);
+                        if (urls.length === 0 && images?.originals?.url) {
+                            urls.push(images.originals.url);
                         }
                         
                         if (urls.length > 0) {
@@ -2127,36 +2139,19 @@ async function download_pins(items) {
 
     const folder_name = get_folder_name();
 
-    // Deduplicate items based on media_url to prevent downloading identical files (e.g. pin_1234 (1).jpg)
+    // Only skip items that have been globally downloaded in previous batches (if Remember Pins is on)
     const unique_items = [];
-    const seen_urls = new Set();
-    let duplicates_skipped = 0;
     
     for (const item of items) {
         const globally_downloaded = stateful_mode && downloaded_media_urls.has(item.media_url);
         
-        if (!globally_downloaded && !seen_urls.has(item.media_url)) {
-            seen_urls.add(item.media_url);
+        if (!globally_downloaded) {
             unique_items.push(item);
         } else {
-            // It's a duplicate video/media! Instead of completely dropping the pin and losing the item count,
-            // fall back to its thumbnail image (which should be unique to the pin).
-            if (item.image_url && !seen_urls.has(item.image_url)) {
-                seen_urls.add(item.image_url);
-                item.media_url = item.image_url;
-                unique_items.push(item);
-                logger('WARN', `Duplicate media URL skipped, falling back to thumbnail image for pin ${item.pin_url}`);
-            } else {
-                duplicates_skipped++;
-                if (stateful_mode) {
-                    downloaded_pins.add(item.pin_url);
-                }
+            if (stateful_mode) {
+                downloaded_pins.add(item.pin_url);
             }
         }
-    }
-    
-    if (duplicates_skipped > 0) {
-        logger('INFO', `Skipped ${duplicates_skipped} duplicate media URLs found in this batch.`);
     }
 
     const chunks = [];
