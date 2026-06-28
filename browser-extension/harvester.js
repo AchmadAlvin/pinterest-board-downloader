@@ -32,7 +32,8 @@ function extract_best_video(video_list, root_cache) {
     for (const key of Object.keys(video_list)) {
         const qual_obj = resolveRef(video_list[key], root_cache);
         if (qual_obj?.url && qual_obj.url.split('?')[0].endsWith('.m3u8')) {
-            return qual_obj.url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
+            const base = qual_obj.url.replace('.m3u8', '.mp4');
+            return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}`;
         }
     }
     return null;
@@ -80,7 +81,8 @@ function searchForPins(obj, depth = 0, root_cache = null) {
                         urls.push(v);
                         break;
                     } else if (clean.endsWith('.m3u8')) {
-                        urls.push(v.replace('/hls/', '/720p/').replace('.m3u8', '.mp4'));
+                        const base = v.replace('.m3u8', '.mp4');
+                        urls.push(`fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}`);
                         break;
                     }
                 }

@@ -1,37 +1,36 @@
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'download_pin') {
-        fetch(request.url, { method: 'HEAD' })
-            .then(res => {
-                if (!res.ok && res.status === 403) {
-                    sendResponse({ success: false, fallback: true });
-                    return;
+        const urlsToTry = request.urls || [request.url];
+
+        const tryDownload = async () => {
+            for (const url of urlsToTry) {
+                try {
+                    const res = await fetch(url, { method: 'HEAD' });
+                    if (res.ok || res.status !== 403) {
+                        return new Promise(resolve => {
+                            chrome.downloads.download({
+                                url: url,
+                                filename: request.filename,
+                                conflictAction: 'uniquify'
+                            }, (downloadId) => {
+                                if (chrome.runtime.lastError) {
+                                    resolve({ success: false, error: chrome.runtime.lastError.message });
+                                } else {
+                                    resolve({ success: true, downloadId: downloadId });
+                                }
+                            });
+                        });
+                    }
+                } catch (err) {
+                    // Network error with this URL, try the next one
+                    continue;
                 }
-                chrome.downloads.download({
-                    url: request.url,
-                    filename: request.filename,
-                    conflictAction: 'uniquify'
-                }, (downloadId) => {
-                    if (chrome.runtime.lastError) {
-                        sendResponse({ success: false, error: chrome.runtime.lastError.message });
-                    } else {
-                        sendResponse({ success: true, downloadId: downloadId });
-                    }
-                });
-            })
-            .catch(err => {
-                // If fetch fails (e.g. network error), still try to download via Chrome
-                chrome.downloads.download({
-                    url: request.url,
-                    filename: request.filename,
-                    conflictAction: 'uniquify'
-                }, (downloadId) => {
-                    if (chrome.runtime.lastError) {
-                        sendResponse({ success: false, error: chrome.runtime.lastError.message });
-                    } else {
-                        sendResponse({ success: true, downloadId: downloadId });
-                    }
-                });
-            });
+            }
+            // If all URLs returned 403 or failed
+            return { success: false, fallback: true };
+        };
+
+        tryDownload().then(sendResponse);
         return true; // Indicates we will respond asynchronously
     }
 });

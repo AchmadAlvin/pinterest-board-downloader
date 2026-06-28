@@ -1548,7 +1548,8 @@ async function fetch_pin_media(pin_slug) {
             // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
             for (const key of Object.keys(video_list)) {
                 if (video_list[key]?.url && video_list[key].url.split('?')[0].endsWith('.m3u8')) {
-                    return video_list[key].url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
+                    const base = video_list[key].url.replace('.m3u8', '.mp4');
+                    return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}`;
                 }
             }
             return null;
@@ -1618,7 +1619,8 @@ async function fetch_pin_media(pin_slug) {
                         media_urls.push(v);
                         break;
                     } else if (clean.endsWith('.m3u8')) {
-                        media_urls.push(v.replace('/hls/', '/720p/').replace('.m3u8', '.mp4'));
+                        const base = v.replace('.m3u8', '.mp4');
+                        media_urls.push(`fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}`);
                         break;
                     }
                 }
@@ -2070,7 +2072,16 @@ async function download_pins(items) {
                     logger('WARN', `Skipping HLS stream which cannot be downloaded directly: ${item.media_url}`);
                     return false;
                 }
-                let fileName = item.media_url.split('/').pop().split('?')[0] || `pin_${Date.now()}`;
+                let request_url = item.media_url;
+                let urls_to_try = [request_url];
+
+                if (request_url.startsWith('fallback||')) {
+                    const parts = request_url.split('||');
+                    urls_to_try = parts.slice(1);
+                    request_url = urls_to_try[0]; // For filename generation
+                }
+
+                let fileName = request_url.split('/').pop().split('?')[0] || `pin_${Date.now()}`;
                 if (item.slide_index) {
                     const parts = fileName.split('.');
                     if (parts.length > 1) {
@@ -2084,7 +2095,7 @@ async function download_pins(items) {
 
                 const response = await new Promise((resolve) => {
                     chrome.runtime.sendMessage(
-                        { action: "download_pin", url: item.media_url, filename: full_filename },
+                        { action: "download_pin", urls: urls_to_try, filename: full_filename },
                         (res) => resolve(res)
                     );
                 });
@@ -2095,7 +2106,7 @@ async function download_pins(items) {
                     const img_full_filename = `${folder_name}/${imgFileName}`;
                     const imgResponse = await new Promise((resolve) => {
                         chrome.runtime.sendMessage(
-                            { action: "download_pin", url: item.image_url, filename: img_full_filename },
+                            { action: "download_pin", urls: [item.image_url], filename: img_full_filename },
                             (res) => resolve(res)
                         );
                     });
