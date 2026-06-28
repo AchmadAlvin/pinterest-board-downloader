@@ -2016,9 +2016,16 @@ async function download_pins(items) {
     const folder_name = get_folder_name();
 
     // Only skip items that have been globally downloaded in previous batches (if Remember Pins is on)
+    // AND deduplicate identical media URLs within the current batch (e.g. repins on the same board)
     const unique_items = [];
+    const current_batch_urls = new Set();
 
     for (const item of items) {
+        if (current_batch_urls.has(item.media_url)) {
+            continue; // Skip duplicate media URL in this exact same download session
+        }
+        current_batch_urls.add(item.media_url);
+
         const globally_downloaded = stateful_mode && downloaded_media_urls.has(item.media_url);
 
         if (!globally_downloaded) {
