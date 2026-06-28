@@ -185,6 +185,196 @@ async function initialize() {
     document.body.appendChild(downloader_button);
     DOM.downloader_button.self = downloader_button;
     logger('INFO', 'Downloader is ready. Click the button to open the main UI.');
+
+    // Inject Continuous Memory Harvester
+    const harvester_script = document.createElement('script');
+    harvester_script.textContent = `
+        window.__PBDL_PIN_CACHE = window.__PBDL_PIN_CACHE || {};
+        window.__PBDL_VISITED = window.__PBDL_VISITED || new Set();
+        
+        function resolveRef(val, root_cache) {
+            let current = val;
+            let depth = 0;
+            while (current && current.__ref && root_cache && root_cache[current.__ref] && depth < 5) {
+                current = root_cache[current.__ref];
+                depth++;
+            }
+            return current;
+        }
+
+        function extract_best_video(video_list, root_cache) {
+            if (!video_list) return null;
+            const preferred_qualities = ['V_1080P', 'V_720P', 'V_480P', 'V_240P', 'V_EXP7', 'V_EXP3', 'V_HLSV4_MAC', 'V_HLSV4_IOS'];
+            for (const quality of preferred_qualities) {
+                const qual_obj = resolveRef(video_list[quality], root_cache);
+                if (qual_obj?.url) {
+                    let url = qual_obj.url;
+                    if (url.includes('.mp4')) return url;
+                }
+            }
+            for (const key of Object.keys(video_list)) {
+                const qual_obj = resolveRef(video_list[key], root_cache);
+                if (qual_obj?.url && qual_obj.url.includes('.mp4')) {
+                    return qual_obj.url;
+                }
+            }
+            // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
+            for (const key of Object.keys(video_list)) {
+                const qual_obj = resolveRef(video_list[key], root_cache);
+                if (qual_obj?.url && qual_obj.url.includes('.m3u8')) {
+                    return qual_obj.url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
+                }
+            }
+            return null;
+        }
+
+        function searchForPins(obj, depth = 0, root_cache = null) {
+            if (depth > 7 || !obj || typeof obj !== 'object') return;
+            if (obj instanceof Element || obj.$$typeof) return; 
+            if (window.__PBDL_VISITED.has(obj)) return;
+            window.__PBDL_VISITED.add(obj);
+            
+            if (obj.id && (obj.type === 'pin' || obj.__typename === 'Pin' || obj.story_pin_data || obj.videos || obj.video)) {
+                let urls = [];
+                
+                const story_pin_data = resolveRef(obj.story_pin_data || obj.storyPinData, root_cache);
+                const carousel_data = resolveRef(obj.carousel_data || obj.carouselData, root_cache);
+                const videos = resolveRef(obj.videos || obj.video, root_cache);
+                const video_urls = resolveRef(obj.video_urls || obj.videoUrls, root_cache);
+                const images = resolveRef(obj.images || obj.image, root_cache);
+                
+                if (story_pin_data && story_pin_data.pages) {
+                    const pages = resolveRef(story_pin_data.pages, root_cache);
+                    if (Array.isArray(pages)) {
+                        for (let page of pages) {
+                            page = resolveRef(page, root_cache);
+                            let found_media = false;
+                            const blocks = resolveRef(page.blocks || [], root_cache);
+                            if (Array.isArray(blocks)) {
+                                for (let block of blocks) {
+                                    block = resolveRef(block, root_cache);
+                                    const block_video = resolveRef(block.video, root_cache);
+                                    const block_video_list = block_video ? resolveRef(block_video.video_list || block_video.videoList, root_cache) : null;
+                                    if (block.type === 'story_pin_video_block' && block_video_list) {
+                                        const url = extract_best_video(block_video_list, root_cache);
+                                        if (url) { urls.push(url); found_media = true; }
+                                    } else if (block.type === 'story_pin_image_block') {
+                                        const block_image = resolveRef(block.image, root_cache);
+                                        const block_images = block_image ? resolveRef(block_image.images, root_cache) : null;
+                                        const block_originals = block_images ? resolveRef(block_images.originals || block_images.orig, root_cache) : null;
+                                        if (block_originals?.url) {
+                                            urls.push(block_originals.url);
+                                            found_media = true;
+                                        }
+                                    }
+                                }
+                            }
+                            if (!found_media) {
+                                const page_video = resolveRef(page.video, root_cache);
+                                const page_video_list = page_video ? resolveRef(page_video.video_list || page_video.videoList, root_cache) : null;
+                                if (page_video_list) {
+                                    const url = extract_best_video(page_video_list, root_cache);
+                                    if (url) { urls.push(url); found_media = true; }
+                                }
+                                if (!found_media) {
+                                    const page_image = resolveRef(page.image, root_cache);
+                                    const page_images = page_image ? resolveRef(page_image.images, root_cache) : null;
+                                    const page_originals = page_images ? resolveRef(page_images.originals || page_images.orig, root_cache) : null;
+                                    if (page_originals?.url) {
+                                        urls.push(page_originals.url);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (carousel_data && carousel_data.carousel_slots) {
+                    const slots = resolveRef(carousel_data.carousel_slots, root_cache);
+                    if (Array.isArray(slots)) {
+                        for (let slot of slots) {
+                            slot = resolveRef(slot, root_cache);
+                            const slot_images = resolveRef(slot.images, root_cache);
+                            const slot_originals = slot_images ? resolveRef(slot_images.originals || slot_images.orig, root_cache) : null;
+                            if (slot_originals?.url) {
+                                urls.push(slot_originals.url);
+                            }
+                        }
+                    }
+                } else {
+                    const video_list = videos ? resolveRef(videos.video_list || videos.videoList, root_cache) : null;
+                    if (video_list) {
+                        const url = extract_best_video(video_list, root_cache);
+                        if (url) urls.push(url);
+                    }
+                }
+                
+                if (urls.length === 0 && video_urls) {
+                    const vlist = Array.isArray(video_urls) ? video_urls : [video_urls];
+                    for (let v of vlist) {
+                        v = resolveRef(v, root_cache);
+                        if (typeof v === 'string' && v.length > 0) {
+                            urls.push(v);
+                            break;
+                        }
+                    }
+                }
+                
+                if (urls.length === 0 && images) {
+                    const images_obj = resolveRef(images, root_cache);
+                    const originals = images_obj ? resolveRef(images_obj.originals || images_obj.orig, root_cache) : null;
+                    if (originals?.url) {
+                        urls.push(originals.url);
+                    }
+                }
+                
+                if (urls.length > 0) {
+                    window.__PBDL_PIN_CACHE[obj.id] = urls;
+                }
+            }
+            
+            if (Array.isArray(obj)) {
+                for (let item of obj) searchForPins(item, depth + 1, root_cache);
+            } else {
+                for (let key of Object.keys(obj)) {
+                    if (key === 'related_pins' || key === 'relatedPins' || key === 'recommended_pins' || key.startsWith('__react') || key === 'memoizedProps' || key === 'memoizedState' || key === 'stateNode' || key === 'updateQueue') continue;
+                    searchForPins(obj[key], depth + 1, root_cache);
+                }
+            }
+        }
+        
+        window.__PBDL_HARVESTER = setInterval(() => {
+            try {
+                // Periodically check global caches
+                let rc = null;
+                if (window.__APOLLO_CLIENT__) {
+                    rc = window.__APOLLO_CLIENT__.cache.extract();
+                    searchForPins(rc, 0, rc);
+                }
+                if (window.__PWS_DATA__) searchForPins(window.__PWS_DATA__);
+                if (window.__PWS_INITIAL_PROPS__) searchForPins(window.__PWS_INITIAL_PROPS__);
+                
+                // Periodically harvest from React Fiber for pins currently in the DOM
+                const pinElements = document.querySelectorAll('[data-test-id="pin"], a[href^="/pin/"]');
+                pinElements.forEach(el => {
+                    const reactKeys = Object.keys(el).filter(key => key.startsWith('__reactFiber$'));
+                    if (reactKeys.length > 0) {
+                        let curr = el[reactKeys[0]];
+                        let limit = 20; // Fast upward traversal for each pin
+                        while (curr && limit > 0) {
+                            limit--;
+                            if (curr.memoizedProps) {
+                                searchForPins(curr.memoizedProps);
+                            }
+                            curr = curr.return;
+                        }
+                    }
+                });
+                
+                // Keep the visited set from growing forever
+                if (window.__PBDL_VISITED.size > 20000) window.__PBDL_VISITED.clear();
+            } catch(e) {}
+        }, 800);
+    `;
+    document.documentElement.appendChild(harvester_script);
 }
 
 function initialize_full_ui() {
@@ -1360,227 +1550,24 @@ async function extract_memory_pins() {
         };
         window.addEventListener('message', listener);
         
-        script.textContent = `
+        const loader = document.createElement('script');
+        loader.textContent = `
             try {
-                let pins = {};
-                let root_cache = null;
-                
-                function resolveRef(val) {
-                    let current = val;
-                    // Prevent infinite loops with a depth counter
-                    let depth = 0;
-                    while (current && current.__ref && root_cache && root_cache[current.__ref] && depth < 5) {
-                        current = root_cache[current.__ref];
-                        depth++;
-                    }
-                    return current;
-                }
-
-                function extract_best_video(video_list) {
-                    if (!video_list) return null;
-                    const preferred_qualities = ['V_1080P', 'V_720P', 'V_480P', 'V_240P', 'V_EXP7', 'V_EXP3', 'V_HLSV4_MAC', 'V_HLSV4_IOS'];
-                    for (const quality of preferred_qualities) {
-                        const qual_obj = resolveRef(video_list[quality]);
-                        if (qual_obj?.url) {
-                            let url = qual_obj.url;
-                            if (url.includes('.mp4')) return url;
-                        }
-                    }
-                    for (const key of Object.keys(video_list)) {
-                        const qual_obj = resolveRef(video_list[key]);
-                        if (qual_obj?.url && qual_obj.url.includes('.mp4')) {
-                            return qual_obj.url;
-                        }
-                    }
-                    // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
-                    for (const key of Object.keys(video_list)) {
-                        const qual_obj = resolveRef(video_list[key]);
-                        if (qual_obj?.url && qual_obj.url.includes('.m3u8')) {
-                            return qual_obj.url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
-                        }
-                    }
-                    return null;
-                }
-
-                const visited = new Set();
-
-                function searchForPins(obj, depth = 0) {
-                    if (depth > 7 || !obj || typeof obj !== 'object') return;
-                    if (obj instanceof Element || obj.$$typeof) return; // Skip DOM nodes and React elements
-                    if (visited.has(obj)) return;
-                    visited.add(obj);
-                    
-                    if (obj.id && (obj.type === 'pin' || obj.__typename === 'Pin' || obj.story_pin_data || obj.videos || obj.video)) {
-                        let urls = [];
-                        
-                        const story_pin_data = resolveRef(obj.story_pin_data || obj.storyPinData);
-                        const carousel_data = resolveRef(obj.carousel_data || obj.carouselData);
-                        const videos = resolveRef(obj.videos || obj.video);
-                        const video_urls = resolveRef(obj.video_urls || obj.videoUrls);
-                        const images = resolveRef(obj.images || obj.image);
-                        
-                        if (story_pin_data && story_pin_data.pages) {
-                            const pages = resolveRef(story_pin_data.pages);
-                            if (Array.isArray(pages)) {
-                                for (let page of pages) {
-                                    page = resolveRef(page);
-                                    let found_media = false;
-                                    const blocks = resolveRef(page.blocks || []);
-                                    if (Array.isArray(blocks)) {
-                                        for (let block of blocks) {
-                                            block = resolveRef(block);
-                                            const block_video = resolveRef(block.video);
-                                            const block_video_list = block_video ? resolveRef(block_video.video_list || block_video.videoList) : null;
-                                            if (block.type === 'story_pin_video_block' && block_video_list) {
-                                                const url = extract_best_video(block_video_list);
-                                                if (url) { urls.push(url); found_media = true; }
-                                            } else if (block.type === 'story_pin_image_block') {
-                                                const block_image = resolveRef(block.image);
-                                                const block_images = block_image ? resolveRef(block_image.images) : null;
-                                                const block_originals = block_images ? resolveRef(block_images.originals) : null;
-                                                if (block_originals?.url) {
-                                                    urls.push(block_originals.url);
-                                                    found_media = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if (!found_media) {
-                                        const page_video = resolveRef(page.video);
-                                        const page_video_list = page_video ? resolveRef(page_video.video_list || page_video.videoList) : null;
-                                        if (page_video_list) {
-                                            const url = extract_best_video(page_video_list);
-                                            if (url) { urls.push(url); found_media = true; }
-                                        }
-                                        if (!found_media) {
-                                            const page_image = resolveRef(page.image);
-                                            const page_images = page_image ? resolveRef(page_image.images) : null;
-                                            const page_originals = page_images ? resolveRef(page_images.originals) : null;
-                                            if (page_originals?.url) {
-                                                urls.push(page_originals.url);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else if (carousel_data && carousel_data.carousel_slots) {
-                            const slots = resolveRef(carousel_data.carousel_slots);
-                            if (Array.isArray(slots)) {
-                                for (let slot of slots) {
-                                    slot = resolveRef(slot);
-                                    const slot_images = resolveRef(slot.images);
-                                    const slot_originals = slot_images ? resolveRef(slot_images.originals) : null;
-                                    if (slot_originals?.url) {
-                                        urls.push(slot_originals.url);
-                                    }
-                                }
-                            }
-                        } else {
-                            const video_list = videos ? resolveRef(videos.video_list || videos.videoList) : null;
-                            if (video_list) {
-                                const url = extract_best_video(video_list);
-                                if (url) urls.push(url);
-                            }
-                        }
-                        
-                        if (urls.length === 0 && video_urls) {
-                            const vlist = Array.isArray(video_urls) ? video_urls : [video_urls];
-                            for (let v of vlist) {
-                                v = resolveRef(v);
-                                if (typeof v === 'string' && v.length > 0) {
-                                    urls.push(v);
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (urls.length === 0 && images) {
-                            const images_obj = resolveRef(images);
-                            const originals = images_obj ? resolveRef(images_obj.originals || images_obj.orig) : null;
-                            if (originals?.url) {
-                                urls.push(originals.url);
-                            }
-                        }
-                        
-                        if (urls.length > 0) {
-                            pins[obj.id] = urls;
-                        }
-                    }
-                    
-                    if (Array.isArray(obj)) {
-                        for (let item of obj) searchForPins(item, depth + 1);
-                    } else {
-                        for (let key of Object.keys(obj)) {
-                            if (key === 'related_pins' || key === 'relatedPins' || key === 'recommended_pins' || key.startsWith('__react') || key === 'memoizedProps' || key === 'memoizedState' || key === 'stateNode' || key === 'updateQueue') continue;
-                            searchForPins(obj[key], depth + 1);
-                        }
-                    }
-                }
-                
-                // 1. Try global window objects
-                if (window.__PWS_DATA__) searchForPins(window.__PWS_DATA__);
-                if (window.__PWS_INITIAL_PROPS__) searchForPins(window.__PWS_INITIAL_PROPS__);
-                if (window.__APOLLO_CLIENT__) {
-                    root_cache = window.__APOLLO_CLIENT__.cache.extract();
-                    searchForPins(root_cache);
-                }
-                
-                // 2. Try React Fiber extraction (For Relay/modern Pinterest)
-                const pinElements = document.querySelectorAll('[data-test-id="pin"], a[href^="/pin/"]');
-                pinElements.forEach(el => {
-                    const reactKeys = Object.keys(el).filter(key => key.startsWith('__reactFiber$'));
-                    if (reactKeys.length > 0) {
-                        let curr = el[reactKeys[0]];
-                        let limit = 100;
-                        while (curr && limit > 0) {
-                            limit--;
-                            const name = curr.type?.displayName || curr.type?.name || curr.elementType?.name || curr.tag;
-                            // The Masonry component holds the master list of all pins (including virtualized ones)
-                            if ((name === 'Masonry' || curr.memoizedProps?.pinData || curr.memoizedProps?.searchResults) && curr.memoizedProps) {
-                                if (curr.memoizedProps.items) searchForPins(curr.memoizedProps.items);
-                                if (curr.memoizedProps.pinData) searchForPins(curr.memoizedProps.pinData);
-                                if (curr.memoizedProps.searchResults) searchForPins(curr.memoizedProps.searchResults);
-                                break;
-                            }
-                            // Also search general props just in case
-                            if (curr.memoizedProps) {
-                                searchForPins(curr.memoizedProps);
-                            }
-                            curr = curr.return;
-                        }
-                    }
-                });
-                
-                // 3. Close-up view fiber extraction (if Masonry is not present)
-                const closeupVisual = document.querySelector('[data-test-id="closeup-visual-container"]');
-                if (closeupVisual) {
-                    const reactKeys = Object.keys(closeupVisual).filter(key => key.startsWith('__reactFiber$'));
-                    if (reactKeys.length > 0) {
-                        let curr = closeupVisual[reactKeys[0]];
-                        let limit = 100;
-                        while (curr && limit > 0) {
-                            limit--;
-                            if (curr.memoizedProps) {
-                                searchForPins(curr.memoizedProps);
-                            }
-                            curr = curr.return;
-                        }
-                    }
-                }
-                
-                window.postMessage({ type: 'PINTEREST_STORE_DATA', payload: pins }, '*');
+                const data = window.__PBDL_PIN_CACHE || {};
+                window.postMessage({ type: 'PINTEREST_STORE_DATA', payload: data }, '*');
             } catch(e) {
                 console.error("PBDL MEMORY EXTRACTOR ERROR:", e);
                 window.postMessage({ type: 'PINTEREST_STORE_DATA', payload: {} }, '*');
             }
         `;
-        document.documentElement.appendChild(script);
+        document.documentElement.appendChild(loader);
         
         setTimeout(() => {
             window.removeEventListener('message', listener);
+            if (loader.parentNode) loader.remove();
             if (script.parentNode) script.remove();
             resolve();
-        }, 3000);
+        }, 1500);
     });
 }
 
