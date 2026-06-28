@@ -1378,7 +1378,7 @@ async function extract_memory_pins() {
 
                 function extract_best_video(video_list) {
                     if (!video_list) return null;
-                    const preferred_qualities = ['V_1080P', 'V_720P', 'V_480P', 'V_240P', 'V_HLSV4_MAC', 'V_HLSV4_IOS'];
+                    const preferred_qualities = ['V_1080P', 'V_720P', 'V_480P', 'V_240P', 'V_EXP7', 'V_EXP3', 'V_HLSV4_MAC', 'V_HLSV4_IOS'];
                     for (const quality of preferred_qualities) {
                         const qual_obj = resolveRef(video_list[quality]);
                         if (qual_obj?.url) {
@@ -1390,6 +1390,13 @@ async function extract_memory_pins() {
                         const qual_obj = resolveRef(video_list[key]);
                         if (qual_obj?.url && qual_obj.url.includes('.mp4')) {
                             return qual_obj.url;
+                        }
+                    }
+                    // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
+                    for (const key of Object.keys(video_list)) {
+                        const qual_obj = resolveRef(video_list[key]);
+                        if (qual_obj?.url && qual_obj.url.includes('.m3u8')) {
+                            return qual_obj.url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
                         }
                     }
                     return null;
@@ -1489,7 +1496,7 @@ async function extract_memory_pins() {
                         
                         if (urls.length === 0 && images) {
                             const images_obj = resolveRef(images);
-                            const originals = images_obj ? resolveRef(images_obj.originals) : null;
+                            const originals = images_obj ? resolveRef(images_obj.originals || images_obj.orig) : null;
                             if (originals?.url) {
                                 urls.push(originals.url);
                             }
@@ -1504,7 +1511,7 @@ async function extract_memory_pins() {
                         for (let item of obj) searchForPins(item, depth + 1);
                     } else {
                         for (let key of Object.keys(obj)) {
-                            if (key === 'related_pins' || key === 'relatedPins' || key === 'recommended_pins' || key.startsWith('__react')) continue;
+                            if (key === 'related_pins' || key === 'relatedPins' || key === 'recommended_pins' || key.startsWith('__react') || key === 'memoizedProps' || key === 'memoizedState' || key === 'stateNode' || key === 'updateQueue') continue;
                             searchForPins(obj[key], depth + 1);
                         }
                     }
@@ -1519,18 +1526,20 @@ async function extract_memory_pins() {
                 }
                 
                 // 2. Try React Fiber extraction (For Relay/modern Pinterest)
-                const pinElements = document.querySelectorAll('[data-test-id="pin"]');
+                const pinElements = document.querySelectorAll('[data-test-id="pin"], a[href^="/pin/"]');
                 pinElements.forEach(el => {
                     const reactKeys = Object.keys(el).filter(key => key.startsWith('__reactFiber$'));
                     if (reactKeys.length > 0) {
                         let curr = el[reactKeys[0]];
-                        let limit = 50;
+                        let limit = 100;
                         while (curr && limit > 0) {
                             limit--;
                             const name = curr.type?.displayName || curr.type?.name || curr.elementType?.name || curr.tag;
                             // The Masonry component holds the master list of all pins (including virtualized ones)
-                            if (name === 'Masonry' && curr.memoizedProps && curr.memoizedProps.items) {
-                                searchForPins(curr.memoizedProps.items);
+                            if ((name === 'Masonry' || curr.memoizedProps?.pinData || curr.memoizedProps?.searchResults) && curr.memoizedProps) {
+                                if (curr.memoizedProps.items) searchForPins(curr.memoizedProps.items);
+                                if (curr.memoizedProps.pinData) searchForPins(curr.memoizedProps.pinData);
+                                if (curr.memoizedProps.searchResults) searchForPins(curr.memoizedProps.searchResults);
                                 break;
                             }
                             // Also search general props just in case
@@ -1548,7 +1557,7 @@ async function extract_memory_pins() {
                     const reactKeys = Object.keys(closeupVisual).filter(key => key.startsWith('__reactFiber$'));
                     if (reactKeys.length > 0) {
                         let curr = closeupVisual[reactKeys[0]];
-                        let limit = 50;
+                        let limit = 100;
                         while (curr && limit > 0) {
                             limit--;
                             if (curr.memoizedProps) {
@@ -1571,7 +1580,7 @@ async function extract_memory_pins() {
             window.removeEventListener('message', listener);
             if (script.parentNode) script.remove();
             resolve();
-        }, 1500);
+        }, 3000);
     });
 }
 
