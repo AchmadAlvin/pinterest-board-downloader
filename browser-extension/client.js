@@ -1382,7 +1382,7 @@ async function extract_memory_pins() {
                 function searchForPins(obj, depth = 0) {
                     if (depth > 7 || !obj || typeof obj !== 'object') return;
                     
-                    if (obj.id && obj.type === 'pin') {
+                    if (obj.id && (obj.type === 'pin' || obj.__typename === 'Pin')) {
                         let urls = [];
                         
                         const story_pin_data = obj.story_pin_data || obj.storyPinData;
@@ -1557,7 +1557,7 @@ async function fetch_pin_media(pin_slug) {
                 // Helper to recursively find the correct pin object regardless of the GraphQL query name
                 function findPinObj(obj) {
                     if (!obj || typeof obj !== 'object') return null;
-                    if (obj.id === pin_id && (obj.type === 'pin' || obj.videos || obj.story_pin_data || obj.images)) return obj;
+                    if (obj.id === pin_id && (obj.type === 'pin' || obj.__typename === 'Pin' || obj.videos || obj.video || obj.story_pin_data || obj.storyPinData || obj.images || obj.image)) return obj;
                     if (Array.isArray(obj)) {
                         for (let item of obj) {
                             const res = findPinObj(item);
