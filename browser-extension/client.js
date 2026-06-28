@@ -1592,64 +1592,33 @@ async function fetch_pin_media(pin_slug) {
                     }
                 }
 
-                // Strategy 2: Try raw regex to find V_ video keys (returns only 1 best video)
+                // Strategy 2: Try to find pin JSON in __PWS_DATA__
                 if (!pinData) {
-                    const v_regex = /(?:"|&quot;|"|\\")?(?:V_1080P|V_720P|V_480P|V_240P|V_ENC_1080P|V_ENC_720P|V_ENC_480P)(?:"|&quot;|"|\\")?/gi;
-                    let has_v_keys = v_regex.test(html_text);
-                    
-                    if (has_v_keys) {
-                        // Use a detailed regex to extract quality + url pairs
-                        const v_detail_regex = /(?:"|&quot;|"|\\")(V_1080P|V_720P|V_480P|V_240P|V_ENC_1080P|V_ENC_720P|V_ENC_480P)(?:"|&quot;|"|\\")\s*:\s*\{[^}]*(?:"|&quot;|"|\\")?url(?:"|&quot;|"|\\")\s*:\s*(?:"|&quot;|"|\\")(https:[^"'&\s<>]+)(?:"|&quot;|"|\\")?/gi;
-                        const v_matches = [];
-                        let m;
-                        while ((m = v_detail_regex.exec(html_text)) !== null) {
-                            const quality = m[1].toUpperCase();
-                            let url = m[2].replace(/\\u0026/g, '&').replace(/\\\//g, '/').replace(/\\/g, '');
-                            if (!url.includes('.m3u8') && url.includes('.mp4')) {
-                                v_matches.push({ quality, url });
+                    const pws_match = html_text.match(/<script[^>]*id="__PWS_DATA__"[^>]*>(.*?)<\/script>/s);
+                    if (pws_match) {
+                        try {
+                            const data = JSON.parse(pws_match[1]);
+                            const pin_obj = findPinObj(data);
+                            if (pin_obj) {
+                                pinData = pin_obj;
+                                logger('INFO', `Found pin in __PWS_DATA__ for ${pin_id}`);
                             }
-                        }
-                        
-                        if (v_matches.length > 0) {
-                            logger('INFO', `Found ${v_matches.length} video URLs via V_ keys in HTML for pin ${pin_id}`);
-                            // Group by video hash
-                            let slides = {};
-                            for (const v of v_matches) {
-                                const filename = v.url.split('/').pop().split('?')[0];
-                                const base_id = filename.split('_')[0].split('.')[0];
-                                if (!slides[base_id]) slides[base_id] = [];
-                                slides[base_id].push(v);
-                            }
-                            
-                            // Return only the FIRST unique video (best quality)
-                            const first_key = Object.keys(slides)[0];
-                            const versions = slides[first_key];
-                            let best = versions.find(v => v.quality.includes('1080P')) || versions.find(v => v.quality.includes('720P')) || versions.find(v => v.quality.includes('480P')) || versions[0];
-                            return [best.url];
-                        }
+                        } catch (e) {}
                     }
+                }
 
-                    // Strategy 3: Find any MP4 URL
-                    const mp4_regex = /(https:(?:\\\/|\/){2,}[^"'\s<>&]+\.mp4[^"'\s<>&]*)/gi;
-                    const mp4s = [];
-                    let m;
-                    while ((m = mp4_regex.exec(html_text)) !== null) {
-                        mp4s.push(m[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/').replace(/\\/g, ''));
-                    }
-                    
-                    if (mp4s.length > 0) {
-                        logger('INFO', `Found ${mp4s.length} MP4 URLs via regex in HTML for pin ${pin_id}`);
-                        return [mp4s[0]];
-                    }
-                    
-                    // Strategy 4: Find original image URL
-                    const img_regex = /"(https:\/\/[^"]+\/originals\/[^"]+\.(?:jpg|png|webp))"/g;
-                    const imgs = [];
-                    while ((m = img_regex.exec(html_text)) !== null) {
-                        imgs.push(m[1].replace(/\\u0026/g, '&').replace(/\\/g, ''));
-                    }
-                    if (imgs.length > 0) {
-                        return [imgs[0]];
+                // Strategy 3: Try to find pin JSON in __PWS_INITIAL_PROPS__
+                if (!pinData) {
+                    const props_match = html_text.match(/<script[^>]*id="__PWS_INITIAL_PROPS__"[^>]*>(.*?)<\/script>/s);
+                    if (props_match) {
+                        try {
+                            const data = JSON.parse(props_match[1]);
+                            const pin_obj = findPinObj(data);
+                            if (pin_obj) {
+                                pinData = pin_obj;
+                                logger('INFO', `Found pin in __PWS_INITIAL_PROPS__ for ${pin_id}`);
+                            }
+                        } catch (e) {}
                     }
                 }
             }
@@ -1681,14 +1650,21 @@ async function fetch_pin_media(pin_slug) {
             return null;
         }
 
+        const story_pin_data = pinData.story_pin_data || pinData.storyPinData;
+        const carousel_data = pinData.carousel_data || pinData.carouselData;
+        const videos = pinData.videos || pinData.video;
+        const video_urls = pinData.video_urls || pinData.videoUrls;
+        const images = pinData.images || pinData.image;
+
         // 1. Story Pin (multi-page)
-        if (pinData.story_pin_data && pinData.story_pin_data.pages) {
-            logger('DEBUG', `Pin ${pin_id}: Detected Story Pin with ${pinData.story_pin_data.pages.length} pages`);
-            for (const page of pinData.story_pin_data.pages) {
+        if (story_pin_data && story_pin_data.pages) {
+            logger('DEBUG', `Pin ${pin_id}: Detected Story Pin with ${story_pin_data.pages.length} pages`);
+            for (const page of story_pin_data.pages) {
                 let found_media = false;
                 for (const block of (page.blocks || [])) {
-                    if (block.type === 'story_pin_video_block' && block.video?.video_list) {
-                        const url = extract_best_video(block.video.video_list);
+                    const block_video_list = block.video?.video_list || block.video?.videoList;
+                    if (block.type === 'story_pin_video_block' && block_video_list) {
+                        const url = extract_best_video(block_video_list);
                         if (url) { media_urls.push(url); found_media = true; }
                     } else if (block.type === 'story_pin_image_block' && block.image?.images?.originals?.url) {
                         media_urls.push(block.image.images.originals.url);
@@ -1697,8 +1673,9 @@ async function fetch_pin_media(pin_slug) {
                 }
                 // Fallback: page-level video or image
                 if (!found_media) {
-                    if (page.video?.video_list) {
-                        const url = extract_best_video(page.video.video_list);
+                    const page_video_list = page.video?.video_list || page.video?.videoList;
+                    if (page_video_list) {
+                        const url = extract_best_video(page_video_list);
                         if (url) { media_urls.push(url); found_media = true; }
                     }
                     if (!found_media && page.image?.images?.originals?.url) {
@@ -1708,27 +1685,28 @@ async function fetch_pin_media(pin_slug) {
             }
         }
         // 2. Carousel (multi-image)
-        else if (pinData.carousel_data && pinData.carousel_data.carousel_slots) {
-            logger('DEBUG', `Pin ${pin_id}: Detected Carousel with ${pinData.carousel_data.carousel_slots.length} slots`);
-            for (const slot of pinData.carousel_data.carousel_slots) {
+        else if (carousel_data && carousel_data.carousel_slots) {
+            logger('DEBUG', `Pin ${pin_id}: Detected Carousel with ${carousel_data.carousel_slots.length} slots`);
+            for (const slot of carousel_data.carousel_slots) {
                 if (slot.images?.originals?.url) {
                     media_urls.push(slot.images.originals.url);
                 }
             }
         }
         // 3. Regular video pin
-        else if (pinData.videos?.video_list) {
+        else if (videos && (videos.video_list || videos.videoList)) {
             logger('DEBUG', `Pin ${pin_id}: Detected video pin`);
-            const url = extract_best_video(pinData.videos.video_list);
+            const video_list = videos.video_list || videos.videoList;
+            const url = extract_best_video(video_list);
             if (url) {
                 media_urls.push(url);
             }
         }
 
         // 4. If no media found yet, check for video_urls field (alternative video storage)
-        if (media_urls.length === 0 && pinData.video_urls) {
+        if (media_urls.length === 0 && video_urls) {
             logger('DEBUG', `Pin ${pin_id}: Found video_urls field`);
-            const video_url_list = Array.isArray(pinData.video_urls) ? pinData.video_urls : [pinData.video_urls];
+            const video_url_list = Array.isArray(video_urls) ? video_urls : [video_urls];
             for (const v of video_url_list) {
                 if (typeof v === 'string' && v.length > 0) {
                     media_urls.push(v);
@@ -1738,9 +1716,9 @@ async function fetch_pin_media(pin_slug) {
         }
 
         // 5. Fallback to highest quality image
-        if (media_urls.length === 0 && pinData.images?.originals?.url) {
+        if (media_urls.length === 0 && images?.originals?.url) {
             logger('DEBUG', `Pin ${pin_id}: Falling back to originals image`);
-            media_urls.push(pinData.images.originals.url);
+            media_urls.push(images.originals.url);
         }
 
         logger('INFO', `Pin ${pin_id}: Extracted ${media_urls.length} media URL(s)`);
