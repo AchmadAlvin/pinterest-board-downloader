@@ -19,21 +19,30 @@ function extract_best_video(video_list, root_cache) {
         const qual_obj = resolveRef(video_list[quality], root_cache);
         if (qual_obj?.url) {
             let url = qual_obj.url;
-            if (url.split('?')[0].endsWith('.mp4')) return url;
+            const clean = url.split('?')[0].split('#')[0].toLowerCase();
+            if (!clean.endsWith('.m3u8') && !clean.endsWith('.xml') && !clean.endsWith('.mpd')) {
+                return url;
+            }
         }
     }
     for (const key of Object.keys(video_list)) {
         const qual_obj = resolveRef(video_list[key], root_cache);
-        if (qual_obj?.url && qual_obj.url.split('?')[0].endsWith('.mp4')) {
-            return qual_obj.url;
+        if (qual_obj?.url) {
+            const clean = qual_obj.url.split('?')[0].split('#')[0].toLowerCase();
+            if (!clean.endsWith('.m3u8') && !clean.endsWith('.xml') && !clean.endsWith('.mpd')) {
+                return qual_obj.url;
+            }
         }
     }
     // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
     for (const key of Object.keys(video_list)) {
         const qual_obj = resolveRef(video_list[key], root_cache);
-        if (qual_obj?.url && qual_obj.url.split('?')[0].endsWith('.m3u8')) {
-            const base = qual_obj.url.replace('.m3u8', '.mp4');
-            return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}`;
+        if (qual_obj?.url) {
+            const clean = qual_obj.url.split('?')[0].split('#')[0].toLowerCase();
+            if (clean.endsWith('.m3u8')) {
+                const base = qual_obj.url.replace('.m3u8', '.mp4');
+                return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}`;
+            }
         }
     }
     return null;
@@ -76,13 +85,13 @@ function searchForPins(obj, depth = 0, root_cache = null) {
             for (let v of vlist) {
                 v = resolveRef(v, root_cache);
                 if (typeof v === 'string') {
-                    const clean = v.split('?')[0];
-                    if (clean.endsWith('.mp4')) {
-                        urls.push(v);
-                        break;
-                    } else if (clean.endsWith('.m3u8')) {
+                    const clean = v.split('?')[0].split('#')[0].toLowerCase();
+                    if (clean.endsWith('.m3u8')) {
                         const base = v.replace('.m3u8', '.mp4');
-                        urls.push(`fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}`);
+                        urls.push(`fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}`);
+                        break;
+                    } else if (!clean.endsWith('.xml') && !clean.endsWith('.mpd')) {
+                        urls.push(v);
                         break;
                     }
                 }

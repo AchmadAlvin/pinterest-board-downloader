@@ -1535,21 +1535,30 @@ async function fetch_pin_media(pin_slug) {
             const quality_order = ['V_720P', 'V_1080P', 'V_480P', 'V_240P', 'V_ENC_720P', 'V_ENC_1080P', 'V_ENC_480P', 'V_ENC_240P'];
             // First try named qualities
             for (const q of quality_order) {
-                if (video_list[q]?.url && video_list[q].url.split('?')[0].endsWith('.mp4')) {
-                    return video_list[q].url;
+                if (video_list[q]?.url) {
+                    const clean = video_list[q].url.split('?')[0].split('#')[0].toLowerCase();
+                    if (!clean.endsWith('.m3u8') && !clean.endsWith('.xml') && !clean.endsWith('.mpd')) {
+                        return video_list[q].url;
+                    }
                 }
             }
-            // Fallback: pick the first entry that has an .mp4 URL
+            // Fallback: pick the first entry that is not a manifest
             for (const key of Object.keys(video_list)) {
-                if (video_list[key]?.url && video_list[key].url.split('?')[0].endsWith('.mp4')) {
-                    return video_list[key].url;
+                if (video_list[key]?.url) {
+                    const clean = video_list[key].url.split('?')[0].split('#')[0].toLowerCase();
+                    if (!clean.endsWith('.m3u8') && !clean.endsWith('.xml') && !clean.endsWith('.mpd')) {
+                        return video_list[key].url;
+                    }
                 }
             }
             // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
             for (const key of Object.keys(video_list)) {
-                if (video_list[key]?.url && video_list[key].url.split('?')[0].endsWith('.m3u8')) {
-                    const base = video_list[key].url.replace('.m3u8', '.mp4');
-                    return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}`;
+                if (video_list[key]?.url) {
+                    const clean = video_list[key].url.split('?')[0].split('#')[0].toLowerCase();
+                    if (clean.endsWith('.m3u8')) {
+                        const base = video_list[key].url.replace('.m3u8', '.mp4');
+                        return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}`;
+                    }
                 }
             }
             return null;
@@ -1614,13 +1623,13 @@ async function fetch_pin_media(pin_slug) {
             const video_url_list = Array.isArray(video_urls) ? video_urls : [video_urls];
             for (const v of video_url_list) {
                 if (typeof v === 'string' && v.length > 0) {
-                    const clean = v.split('?')[0];
-                    if (clean.endsWith('.mp4')) {
-                        media_urls.push(v);
-                        break;
-                    } else if (clean.endsWith('.m3u8')) {
+                    const clean = v.split('?')[0].split('#')[0].toLowerCase();
+                    if (clean.endsWith('.m3u8')) {
                         const base = v.replace('.m3u8', '.mp4');
-                        media_urls.push(`fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}`);
+                        media_urls.push(`fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}`);
+                        break;
+                    } else if (!clean.endsWith('.xml') && !clean.endsWith('.mpd')) {
+                        media_urls.push(v);
                         break;
                     }
                 }
@@ -2096,7 +2105,13 @@ async function download_pins(items) {
                 const response = await new Promise((resolve) => {
                     chrome.runtime.sendMessage(
                         { action: "download_pin", urls: urls_to_try, filename: full_filename },
-                        (res) => resolve(res)
+                        (res) => {
+                            if (chrome.runtime.lastError) {
+                                resolve({ success: false, fallback: true, error: chrome.runtime.lastError.message });
+                            } else {
+                                resolve(res);
+                            }
+                        }
                     );
                 });
 
@@ -2107,7 +2122,13 @@ async function download_pins(items) {
                     const imgResponse = await new Promise((resolve) => {
                         chrome.runtime.sendMessage(
                             { action: "download_pin", urls: [item.image_url], filename: img_full_filename },
-                            (res) => resolve(res)
+                            (res) => {
+                                if (chrome.runtime.lastError) {
+                                    resolve({ success: false, error: chrome.runtime.lastError.message });
+                                } else {
+                                    resolve(res);
+                                }
+                            }
                         );
                     });
                     if (!imgResponse || !imgResponse.success) {
