@@ -1545,12 +1545,6 @@ async function fetch_pin_media(pin_slug) {
                     return video_list[key].url;
                 }
             }
-            // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
-            for (const key of Object.keys(video_list)) {
-                if (video_list[key]?.url && video_list[key].url.split('?')[0].endsWith('.m3u8')) {
-                    return video_list[key].url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
-                }
-            }
             return null;
         }
 
@@ -1616,9 +1610,6 @@ async function fetch_pin_media(pin_slug) {
                     const clean = v.split('?')[0];
                     if (clean.endsWith('.mp4')) {
                         media_urls.push(v);
-                        break;
-                    } else if (clean.endsWith('.m3u8')) {
-                        media_urls.push(v.replace('/hls/', '/720p/').replace('.m3u8', '.mp4'));
                         break;
                     }
                 }

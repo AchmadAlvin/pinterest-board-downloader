@@ -28,13 +28,6 @@ function extract_best_video(video_list, root_cache) {
             return qual_obj.url;
         }
     }
-    // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
-    for (const key of Object.keys(video_list)) {
-        const qual_obj = resolveRef(video_list[key], root_cache);
-        if (qual_obj?.url && qual_obj.url.split('?')[0].endsWith('.m3u8')) {
-            return qual_obj.url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
-        }
-    }
     return null;
 }
 
@@ -79,9 +72,6 @@ function searchForPins(obj, depth = 0, root_cache = null) {
                     if (clean.endsWith('.mp4')) {
                         urls.push(v);
                         break;
-                    } else if (clean.endsWith('.m3u8')) {
-                        urls.push(v.replace('/hls/', '/720p/').replace('.m3u8', '.mp4'));
-                        break;
                     }
                 }
             }
@@ -92,44 +82,46 @@ function searchForPins(obj, depth = 0, root_cache = null) {
             if (pages && Array.isArray(pages)) {
                 for (let page of pages) {
                     let found_media = false;
-                    const blocks = resolveRef(page.blocks, root_cache);
-                    if (blocks && Array.isArray(blocks)) {
-                        for (let block of blocks) {
-                            const b_video = resolveRef(block.video, root_cache);
-                            if (b_video) {
-                                const vl = resolveRef(b_video.video_list || b_video.videoList, root_cache);
-                                const best_video = extract_best_video(vl, root_cache);
-                                if (best_video) {
-                                    urls.push(best_video);
-                                    found_media = true;
-                                }
-                            } else if (block.type === 'story_pin_image_block') {
-                                const b_image = resolveRef(block.image, root_cache);
-                                const originals = b_image ? resolveRef(b_image.originals || b_image.orig, root_cache) : null;
-                                if (originals && originals.url) {
-                                    urls.push(originals.url);
-                                    found_media = true;
+                    
+                    const page_video = resolveRef(page.video, root_cache);
+                    if (page_video) {
+                        const vl = resolveRef(page_video.video_list || page_video.videoList, root_cache);
+                        const best_video = extract_best_video(vl, root_cache);
+                        if (best_video) {
+                            urls.push(best_video);
+                            found_media = true;
+                        }
+                    }
+
+                    if (!found_media) {
+                        const blocks = resolveRef(page.blocks, root_cache);
+                        if (blocks && Array.isArray(blocks)) {
+                            for (let block of blocks) {
+                                const b_video = resolveRef(block.video, root_cache);
+                                if (b_video) {
+                                    const vl = resolveRef(b_video.video_list || b_video.videoList, root_cache);
+                                    const best_video = extract_best_video(vl, root_cache);
+                                    if (best_video) {
+                                        urls.push(best_video);
+                                        found_media = true;
+                                    }
+                                } else if (block.type === 'story_pin_image_block') {
+                                    const b_image = resolveRef(block.image, root_cache);
+                                    const originals = b_image ? resolveRef(b_image.originals || b_image.orig, root_cache) : null;
+                                    if (originals && originals.url) {
+                                        urls.push(originals.url);
+                                        found_media = true;
+                                    }
                                 }
                             }
                         }
                     }
                     if (!found_media) {
-                        const page_video = resolveRef(page.video, root_cache);
-                        if (page_video) {
-                            const vl = resolveRef(page_video.video_list || page_video.videoList, root_cache);
-                            const best_video = extract_best_video(vl, root_cache);
-                            if (best_video) {
-                                urls.push(best_video);
-                                found_media = true;
-                            }
-                        }
-                        if (!found_media) {
-                            const page_image = resolveRef(page.image, root_cache);
-                            const p_images = page_image ? resolveRef(page_image.images, root_cache) : null;
-                            const originals = p_images ? resolveRef(p_images.originals || p_images.orig, root_cache) : null;
-                            if (originals && originals.url) {
-                                urls.push(originals.url);
-                            }
+                        const page_image = resolveRef(page.image, root_cache);
+                        const p_images = page_image ? resolveRef(page_image.images, root_cache) : null;
+                        const originals = p_images ? resolveRef(p_images.originals || p_images.orig, root_cache) : null;
+                        if (originals && originals.url) {
+                            urls.push(originals.url);
                         }
                     }
                 }
