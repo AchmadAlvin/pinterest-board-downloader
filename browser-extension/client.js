@@ -1545,6 +1545,12 @@ async function fetch_pin_media(pin_slug) {
                     return video_list[key].url;
                 }
             }
+            // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
+            for (const key of Object.keys(video_list)) {
+                if (video_list[key]?.url && video_list[key].url.split('?')[0].endsWith('.m3u8')) {
+                    return video_list[key].url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
+                }
+            }
             return null;
         }
 
@@ -1610,6 +1616,9 @@ async function fetch_pin_media(pin_slug) {
                     const clean = v.split('?')[0];
                     if (clean.endsWith('.mp4')) {
                         media_urls.push(v);
+                        break;
+                    } else if (clean.endsWith('.m3u8')) {
+                        media_urls.push(v.replace('/hls/', '/720p/').replace('.m3u8', '.mp4'));
                         break;
                     }
                 }
@@ -2080,7 +2089,20 @@ async function download_pins(items) {
                     );
                 });
 
-                if (!response || !response.success) {
+                if (response && response.fallback && item.image_url) {
+                    logger('WARN', `Server returned 403 for synthesized video URL, falling back to image: ${item.image_url}`);
+                    let imgFileName = item.image_url.split('/').pop().split('?')[0] || `pin_${Date.now()}`;
+                    const img_full_filename = `${folder_name}/${imgFileName}`;
+                    const imgResponse = await new Promise((resolve) => {
+                        chrome.runtime.sendMessage(
+                            { action: "download_pin", url: item.image_url, filename: img_full_filename },
+                            (res) => resolve(res)
+                        );
+                    });
+                    if (!imgResponse || !imgResponse.success) {
+                        throw new Error(imgResponse ? imgResponse.error : 'Unknown fallback download error');
+                    }
+                } else if (!response || !response.success) {
                     throw new Error(response ? response.error : 'Unknown download error');
                 }
 

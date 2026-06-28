@@ -28,6 +28,13 @@ function extract_best_video(video_list, root_cache) {
             return qual_obj.url;
         }
     }
+    // FALLBACK: If only .m3u8 is available, synthesize the .mp4 URL
+    for (const key of Object.keys(video_list)) {
+        const qual_obj = resolveRef(video_list[key], root_cache);
+        if (qual_obj?.url && qual_obj.url.split('?')[0].endsWith('.m3u8')) {
+            return qual_obj.url.replace('/hls/', '/720p/').replace('.m3u8', '.mp4');
+        }
+    }
     return null;
 }
 
@@ -71,6 +78,9 @@ function searchForPins(obj, depth = 0, root_cache = null) {
                     const clean = v.split('?')[0];
                     if (clean.endsWith('.mp4')) {
                         urls.push(v);
+                        break;
+                    } else if (clean.endsWith('.m3u8')) {
+                        urls.push(v.replace('/hls/', '/720p/').replace('.m3u8', '.mp4'));
                         break;
                     }
                 }

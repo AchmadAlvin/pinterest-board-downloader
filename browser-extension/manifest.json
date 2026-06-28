@@ -12,6 +12,7 @@
   },
   "host_permissions": [
     "https://*.pinterest.com/*",
+    "*://*.pinimg.com/*",
     "*://*.pinterest.ag/*",
     "*://*.pinterest.am/*",
     "*://*.pinterest.at/*",
