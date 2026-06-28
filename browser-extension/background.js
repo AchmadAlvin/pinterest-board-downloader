@@ -3,6 +3,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const urlsToTry = request.urls || [request.url];
 
         const tryDownload = async () => {
+            // FAST PATH: If there's only 1 URL, it's a native URL from the API. 
+            // DO NOT probe it, because background worker fetch probes often get 403'd by AWS WAF due to missing headers!
+            if (urlsToTry.length === 1) {
+                return new Promise(resolve => {
+                    chrome.downloads.download({
+                        url: urlsToTry[0],
+                        filename: request.filename,
+                        conflictAction: 'uniquify'
+                    }, (downloadId) => {
+                        if (chrome.runtime.lastError) {
+                            resolve({ success: false, error: chrome.runtime.lastError.message });
+                        } else {
+                            resolve({ success: true, downloadId: downloadId });
+                        }
+                    });
+                });
+            }
+
             for (const url of urlsToTry) {
                 try {
                     const controller = new AbortController();
