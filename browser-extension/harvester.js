@@ -46,7 +46,7 @@ function extract_best_video(video_list, root_cache) {
                 const base_720w = base.replace(name + '.mp4', name + '_720w.mp4');
                 const base_480w = base.replace(name + '.mp4', name + '_480w.mp4');
                 
-                return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}||${base_1080w.replace('/hls/', '/1080p/')}||${base_720w.replace('/hls/', '/720p/')}||${base_480w.replace('/hls/', '/480p/')}`;
+                return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}||${base_1080w.replace('/hls/', '/1080p/')}||${base_720w.replace('/hls/', '/720p/')}||${base_480w.replace('/hls/', '/480p/')}||hls:${qual_obj.url}`;
             }
         }
     }
@@ -93,7 +93,7 @@ function searchForPins(obj, depth = 0, root_cache = null) {
                     const clean = v.split('?')[0].split('#')[0].toLowerCase();
                     if (clean.endsWith('.m3u8')) {
                         const base = v.replace('.m3u8', '.mp4');
-                        urls.push(`fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}`);
+                        urls.push(`fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}||hls:${v}`);
                         break;
                     } else if (!clean.endsWith('.xml') && !clean.endsWith('.mpd')) {
                         urls.push(v);

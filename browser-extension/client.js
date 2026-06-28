@@ -1572,7 +1572,7 @@ async function fetch_pin_media(pin_slug) {
                     const clean = video_list[key].url.split('?')[0].split('#')[0].toLowerCase();
                     if (clean.endsWith('.m3u8')) {
                         const base = video_list[key].url.replace('.m3u8', '.mp4');
-                        return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}`;
+                        return `fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}||hls:${video_list[key].url}`;
                     }
                 }
             }
@@ -1650,7 +1650,7 @@ async function fetch_pin_media(pin_slug) {
                     const clean = v.split('?')[0].split('#')[0].toLowerCase();
                     if (clean.endsWith('.m3u8')) {
                         const base = v.replace('.m3u8', '.mp4');
-                        media_urls.push(`fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}`);
+                        media_urls.push(`fallback||${base.replace('/hls/', '/1080p/')}||${base.replace('/hls/', '/720p/')}||${base.replace('/hls/', '/480p/')}||${base.replace('/hls/', '/360p/')}||${base.replace('/hls/', '/240p/')}||${base.replace('/hls/', '/orig/')}||${base.replace('/hls/', '/originals/')}||${base.replace('/hls/', '/')}||hls:${v}`);
                         break;
                     } else if (!clean.endsWith('.xml') && !clean.endsWith('.mpd')) {
                         media_urls.push(v);
@@ -2101,22 +2101,26 @@ async function download_pins(items) {
 
         const promises = chunk.map(async (item) => {
             try {
-                if (item.media_url.includes('.m3u8')) {
-                    logger('WARN', `Skipping HLS stream which cannot be downloaded directly: ${item.media_url}`);
-                    return false;
-                }
                 let request_url = item.media_url;
                 let urls_to_try = [request_url];
 
                 let response = { success: false, fallback: true };
+                let hls_url = null;
 
                 if (request_url.startsWith('fallback||')) {
-                    const fallback_urls = request_url.split('||').slice(1);
-                    logger('INFO', `Trying ${fallback_urls.length} synthesized video URLs...`);
-                    // Send all fallback URLs to download_pin which already handles multi-URL probing
-                    urls_to_try = fallback_urls;
-                    // Use the first URL's filename as the download name
-                    request_url = fallback_urls[0];
+                    const all_parts = request_url.split('||').slice(1);
+                    // Separate HLS URL from MP4 probe URLs
+                    const mp4_urls = [];
+                    for (const part of all_parts) {
+                        if (part.startsWith('hls:')) {
+                            hls_url = part.substring(4); // Remove 'hls:' prefix
+                        } else {
+                            mp4_urls.push(part);
+                        }
+                    }
+                    logger('INFO', `Trying ${mp4_urls.length} synthesized video URLs${hls_url ? ' (HLS fallback available)' : ''}...`);
+                    urls_to_try = mp4_urls;
+                    request_url = mp4_urls[0] || request_url;
                 }
 
                 if (urls_to_try.length > 0) {
@@ -2144,6 +2148,36 @@ async function download_pins(items) {
                             }
                         );
                     });
+                }
+
+                // If MP4 probes failed but we have an HLS stream URL, try downloading it
+                if (response && response.fallback && hls_url) {
+                    logger('INFO', `MP4 probes failed, attempting HLS stream download: ${hls_url}`);
+                    let hlsFileName = (request_url.split('/').pop().split('?')[0] || `pin_${Date.now()}`).replace('.mp4', '') + '.mp4';
+                    if (item.slide_index) {
+                        hlsFileName = hlsFileName.replace('.mp4', `_slide_${item.slide_index}.mp4`);
+                    }
+                    const hls_full_filename = `${folder_name}/${hlsFileName}`;
+
+                    const hlsResponse = await new Promise((resolve) => {
+                        chrome.runtime.sendMessage(
+                            { action: "download_hls", m3u8_url: hls_url, filename: hls_full_filename },
+                            (res) => {
+                                if (chrome.runtime.lastError) {
+                                    resolve({ success: false, error: chrome.runtime.lastError.message });
+                                } else {
+                                    resolve(res);
+                                }
+                            }
+                        );
+                    });
+
+                    if (hlsResponse && hlsResponse.success) {
+                        logger('INFO', `Successfully downloaded HLS video: ${hlsFileName}`);
+                        response = { success: true };
+                    } else {
+                        logger('WARN', `HLS download failed: ${hlsResponse?.error || 'unknown error'}`);
+                    }
                 }
 
                 if (response && response.fallback) {
