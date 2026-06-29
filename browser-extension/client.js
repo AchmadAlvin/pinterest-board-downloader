@@ -497,7 +497,13 @@ function initialize_full_ui() {
 
     DOM.full_ui_wrapper.select_visible_pins_elem.self.addEventListener('click', select_all_visible_pins);
     DOM.full_ui_wrapper.selected_pins_wrapper.start_download_btn.self.addEventListener('click', initialize_downloads);
-    DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self.addEventListener('click', () => extract_board_pins(pin_count?.pin_count));
+    DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self.addEventListener('click', () => {
+        if (observer_running && !endless_mode_active) {
+            force_stop_extraction_and_download();
+        } else {
+            extract_board_pins(pin_count?.pin_count);
+        }
+    });
     DOM.full_ui_wrapper.close_ui_elem.self.addEventListener('click', close_full_ui);
     document.addEventListener('contextmenu', handle_click);
 
@@ -1214,6 +1220,11 @@ async function extract_board_pins(pin_count) {
         logger('INFO', `Cleared selection list because "Remember Pins" is off.`);
     }
 
+    if (DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self) {
+        DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self.innerHTML = "Force Download";
+        DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self.style.color = "var(--cc_warning)";
+    }
+
     observer = new MutationObserver((mutation_records) => {
         let pin_urls = new Set();
         let current_time = Date.now();
@@ -1244,6 +1255,12 @@ async function extract_board_pins(pin_count) {
             observer?.disconnect();
             observer = null;
             observer_running = false;
+
+            if (DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self) {
+                DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self.innerHTML = "Download All";
+                DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self.style.color = "";
+            }
+
             DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_success';
             update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, message_template.extraction_success);
             initialize_downloads();
@@ -1287,6 +1304,12 @@ function startTimeoutWatcher() {
             observer?.disconnect();
             observer = null;
             observer_running = false;
+
+            if (DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self) {
+                DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self.innerHTML = "Download All";
+                DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self.style.color = "";
+            }
+
             DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_warning';
             update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Pin search stopped. Proceeding to download ${selected_pins.size} found pins.`);
 
@@ -1305,6 +1328,28 @@ function startTimeoutWatcher() {
             update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `${message_template.waiting_for_pins} ${seconds_remaining}s`);
         }
     }, 2000);
+}
+
+async function force_stop_extraction_and_download() {
+    if (!observer_running || endless_mode_active) return;
+
+    logger('INFO', 'User forced download before all pins were found.');
+    clearInterval(timeout_watcher_interval);
+    clearInterval(auto_scroll_interval);
+    observer?.disconnect();
+    observer = null;
+    observer_running = false;
+
+    // Reset button UI
+    if (DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self) {
+        DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self.innerHTML = "Download All";
+        DOM.full_ui_wrapper.board_count_wrapper.start_download_btn.self.style.color = ""; // reset to default CSS
+    }
+
+    DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_warning';
+    update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Extraction forced. Proceeding to download ${selected_pins.size} found pins.`);
+
+    await initialize_downloads();
 }
 
 function start_auto_scrolling(delay = 1000, human_behavior = true) {
