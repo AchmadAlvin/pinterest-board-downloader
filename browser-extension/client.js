@@ -193,6 +193,26 @@ async function initialize() {
         this.remove();
     };
     (document.head || document.documentElement).appendChild(harvester_script);
+
+    // Multi-page extraction resume
+    if (sessionStorage.getItem('pbdl_multi_page_active') === 'true') {
+        logger('INFO', 'Resuming multi-page section extraction...');
+        setTimeout(() => {
+            initialize_full_ui();
+            
+            const stored_aggregated = sessionStorage.getItem('pbdl_aggregated_pins');
+            if (stored_aggregated) {
+                const parsed = JSON.parse(stored_aggregated);
+                parsed.forEach(p => selected_pins.set(p.url, p));
+                update_currently_selected_pins();
+            }
+            
+            setTimeout(() => {
+                const pin_count = get_board_pin_count();
+                extract_board_pins(pin_count?.pin_count, true);
+            }, 1500);
+        }, 1000);
+    }
 }
 
 function initialize_full_ui() {
@@ -501,6 +521,12 @@ function initialize_full_ui() {
         if (observer_running && !endless_mode_active) {
             force_stop_extraction_and_download();
         } else {
+            // Check if we want to reset multi page state
+            if (sessionStorage.getItem('pbdl_multi_page_active')) {
+                sessionStorage.removeItem('pbdl_multi_page_active');
+                sessionStorage.removeItem('pbdl_section_queue');
+                sessionStorage.removeItem('pbdl_aggregated_pins');
+            }
             extract_board_pins(pin_count?.pin_count);
         }
     });
@@ -1196,7 +1222,77 @@ function handle_marquee_end(e) {
 }
 
 
-async function extract_board_pins(pin_count) {
+function get_board_sections() {
+    logger('INFO', 'Scanning for board sections...');
+    const section_links = new Set();
+    const section_elements = document.querySelectorAll('[data-test-id="board-section"] a');
+    for (let el of section_elements) {
+        if (el.href && !el.href.includes('/pin/')) {
+            section_links.add(el.href);
+        }
+    }
+    
+    // Also try another common selector if the first fails
+    if (section_links.size === 0) {
+        const path_parts = window.location.pathname.split('/');
+        if (path_parts.length > 2) {
+            const board_name = path_parts[2];
+            const alt_elements = document.querySelectorAll(`a[href*="/${board_name}/"]`);
+            for (let el of alt_elements) {
+                if (el.href && !el.href.includes('/pin/') && el.href !== window.location.href && el.href !== window.location.href + '/') {
+                    // Ensure it's a sub-path of the current board
+                    if (el.href.startsWith(window.location.origin + window.location.pathname)) {
+                        section_links.add(el.href);
+                    }
+                }
+            }
+        }
+    }
+    return Array.from(section_links);
+}
+
+async function handle_extraction_complete() {
+    if (sessionStorage.getItem('pbdl_multi_page_active') === 'true') {
+        let queue = JSON.parse(sessionStorage.getItem('pbdl_section_queue') || '[]');
+        
+        // Save current pins to aggregated
+        let aggregated = JSON.parse(sessionStorage.getItem('pbdl_aggregated_pins') || '[]');
+        for (const pin of selected_pins.values()) {
+            if (!aggregated.some(p => p.url === pin.url)) {
+                aggregated.push(pin);
+            }
+        }
+        sessionStorage.setItem('pbdl_aggregated_pins', JSON.stringify(aggregated));
+        
+        if (queue.length > 0) {
+            const next_url = queue.shift();
+            sessionStorage.setItem('pbdl_section_queue', JSON.stringify(queue));
+            logger('INFO', `Navigating to next section: ${next_url}`);
+            DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_log';
+            update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Navigating to next section...`);
+            setTimeout(() => {
+                window.location.href = next_url;
+            }, 1000);
+            return;
+        } else {
+            logger('INFO', `All sections extracted. Preparing combined download.`);
+            sessionStorage.removeItem('pbdl_multi_page_active');
+            sessionStorage.removeItem('pbdl_section_queue');
+            sessionStorage.removeItem('pbdl_aggregated_pins');
+            
+            // Re-populate selected_pins with everything we gathered
+            selected_pins.clear();
+            aggregated.forEach(p => selected_pins.set(p.url, p));
+            update_currently_selected_pins();
+            
+            await initialize_downloads();
+        }
+    } else {
+        await initialize_downloads();
+    }
+}
+
+async function extract_board_pins(pin_count, is_resuming = false) {
     // Check if we're on a board page
     if (!check_if_board_page()) {
         logger('WARN', 'Cannot extract board pins - not on a board page.');
@@ -1205,6 +1301,16 @@ async function extract_board_pins(pin_count) {
 
     // Stop Endless Mode if active
     if (endless_mode_active) stop_endless_mode();
+
+    if (!is_resuming && !sessionStorage.getItem('pbdl_multi_page_active')) {
+        const sections = get_board_sections();
+        if (sections.length > 0) {
+            logger('INFO', `Detected ${sections.length} sub-sections. Activating multi-page extraction.`);
+            sessionStorage.setItem('pbdl_multi_page_active', 'true');
+            sessionStorage.setItem('pbdl_section_queue', JSON.stringify(sections));
+            sessionStorage.setItem('pbdl_aggregated_pins', JSON.stringify([]));
+        }
+    }
 
     logger('INFO', `Starting automatic search for all ${pin_count} pins on the board/section...`);
     if (!Number.isInteger(pin_count) || pin_count <= 0) {
@@ -1263,7 +1369,7 @@ async function extract_board_pins(pin_count) {
 
             DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_success';
             update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, message_template.extraction_success);
-            initialize_downloads();
+            handle_extraction_complete();
             if (!stateful_mode) unselect_pins(Array.from(selected_pins.keys()));
         }
     });
@@ -1315,7 +1421,7 @@ function startTimeoutWatcher() {
 
             // If in normal board mode, start download
             if (!endless_mode_active) {
-                await initialize_downloads();
+                await handle_extraction_complete();
             }
         } else if (time_passed > 10000) {
             // Aggressive scroll check: if stuck for 10s, try random jumps
@@ -1349,7 +1455,7 @@ async function force_stop_extraction_and_download() {
     DOM.full_ui_wrapper.progress_log_elem.self.className = 'cc_warning';
     update_element_html(DOM.full_ui_wrapper.progress_log_elem.self, `Extraction forced. Proceeding to download ${selected_pins.size} found pins.`);
 
-    await initialize_downloads();
+    await handle_extraction_complete();
 }
 
 function start_auto_scrolling(delay = 1000, human_behavior = true) {
